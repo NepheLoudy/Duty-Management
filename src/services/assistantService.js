@@ -58,7 +58,7 @@ function buildBoardCard(dateStr, records) {
   };
 }
 
-/** 群看板（每群 1 小时限流，命中静默） */
+/** 群看板（每群 1 小时限流，命中静默；先占限流戳再发卡，避免并发窗口连发两张） */
 async function handleGroupBoard(chatId) {
   if (!chatId) return { handled: false, reply: '' };
   const now = Date.now();
@@ -68,11 +68,16 @@ async function handleGroupBoard(chatId) {
     console.log(`[看板] 群 ${chatId} 命中限流，静默跳过`);
     return { handled: true, rateLimited: true, reply: '' };
   }
+  state.mutate((st) => { st.boards[chatId] = now; }); // 预占戳
 
-  const records = await dutyTable.getRecordsByDate(todayStr());
-  await bot.sendCardToChat(chatId, buildBoardCard(todayStr(), records));
-  state.mutate((st) => { st.boards[chatId] = now; });
-  return { handled: true, rateLimited: false, reply: '' };
+  try {
+    const records = await dutyTable.getRecordsByDate(todayStr());
+    await bot.sendCardToChat(chatId, buildBoardCard(todayStr(), records));
+    return { handled: true, rateLimited: false, reply: '' };
+  } catch (err) {
+    state.mutate((st) => { delete st.boards[chatId]; }); // 发卡失败回滚，下次可重试
+    throw err;
+  }
 }
 
 /**

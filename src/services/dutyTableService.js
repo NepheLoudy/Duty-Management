@@ -107,17 +107,31 @@ async function setDayStatus(recordIds, value) {
   }
 }
 
+// 附件写入按记录串行化（飞书附件字段是整列覆盖，并发读-改-写会互相丢照片）
+const receiptLocks = new Map();
+
 /**
- * 追加照片凭证到指定岗位附件栏（先读现有附件再合并写入，飞书附件字段是整列覆盖）。
- * 每人只填自己岗位那一列。
+ * 追加照片凭证到指定岗位附件栏（先读现有附件再合并写入）。
+ * 每人只填自己岗位那一列。返回追加后的该列附件数（供回执文案使用，免二次全表拉取）。
  */
 async function appendReceipt(recordId, position, fileToken) {
-  const all = await getAllDayRecords();
-  const record = all.find((r) => r.recordId === recordId);
-  const existing = record ? fieldAttachments(record.fields[config.fields.receipts[position]]) : [];
-  return bitable.updateRecord(recordId, {
-    [config.fields.receipts[position]]: [...existing, { file_token: fileToken }],
+  return withReceiptLock(recordId, async () => {
+    const all = await getAllDayRecords();
+    const record = all.find((r) => r.recordId === recordId);
+    const existing = record ? fieldAttachments(record.fields[config.fields.receipts[position]]) : [];
+    const merged = [...existing, { file_token: fileToken }];
+    await bitable.updateRecord(recordId, {
+      [config.fields.receipts[position]]: merged,
+    });
+    return merged.length;
   });
+}
+
+function withReceiptLock(recordId, fn) {
+  const prev = receiptLocks.get(recordId) || Promise.resolve();
+  const next = prev.then(fn, fn);
+  receiptLocks.set(recordId, next.catch(() => {}));
+  return next;
 }
 
 /**

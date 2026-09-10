@@ -16,3 +16,15 @@
 - 基建：express :3006、node-cron 四任务全过静默闸门、多维表格单一事实来源（字段名可配）、push.js（approval-bot 版改四处，远端 Duty-Management；真实名册/白名单不进 git、显式 SFTP 上 NAS）
 - 隐私：名册/白名单 gitignore + example 模板；代码/文档/测试零真实姓名；表格 token 待 M0 回填（`npm run table:create`/`table:check`）
 - 测试：排班单测 18 项 + 闭环干跑 34 项（scripts/stub-test-*.js），本地联跑稳定
+
+### v2 · 2026-09-11 · 随本提交落地 · fix
+
+**全仓审计 debug 批：两个 P1 逻辑补洞 + 一串 P2 防御**
+
+- P1 对账补收口：错过 22:00 收口（宕机/重启）后，00:30 对账现在会从上次收口水位（lastCloseDate）起逐日回补——空状态置未做完、登记补偿、重算总状态、清残留会话（最多回看 7 天），closeToday 记录收口水位
+- P1 placePending 双插入：加罚产生的同人同周两条义务此前必落同一天（陈旧快照 + 确定性散列）；现在每次就地插入后同步内存周快照，义务标记按 id 定向 mutate（不再整包回写旧快照覆盖并发变更）；目标周已过去的义务标记 expired 留人工裁决，不再插出过去的脏班次
+- 附件并发锁：凭证追加按记录串行化（飞书附件整列覆盖，并发互丢），appendReceipt 直接返回新计数（省一次全表拉取）
+- 会话日期守卫：过期会话（错过收口残留）清理，「是/否/照片」晚到不认旧日期
+- 消息幂等：/api/chat/command 按 messageId 10 分钟去重（hub v66 起透传 messageId），webhook 重投的「我要请假」不再双计补偿
+- 其它：/api/bot/test-generate 默认 dryRun（带 confirm 才写表）、test-close 回执绕过静默（手动触发不受限口径对齐）、D-1 提醒跳过已请假/已完结、群看板先占限流戳再发卡（失败回滚）、QUIET_BACKLOG_FILE 可配（积压文件可挪出项目目录，部署不再清掉）、启动时确保状态目录存在
+- 回归：排班 18 项 + 闭环 40 项全过

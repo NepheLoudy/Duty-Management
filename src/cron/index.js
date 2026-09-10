@@ -73,11 +73,12 @@ function stopCronJobs() {
 /**
  * 收口执行链（cron 与手动接口共用）：业务写表立即执行；
  * 回执通知非静默直接发送、静默窗口内落盘积压（一次性事件通知按序补发）。
+ * 手动触发（options.bypassQuiet）不受静默限制——操作者当下明确要求执行。
  */
 async function runClose(options = {}) {
   const result = await inquiry.closeToday(options);
   if (!options.dryRun && result.notifications) {
-    const deferred = quietHours.gatePayload('duty_close_notify', result.notifications, '值日收口回执');
+    const deferred = options.bypassQuiet ? false : quietHours.gatePayload('duty_close_notify', result.notifications, '值日收口回执');
     if (!deferred) {
       await inquiry.sendCloseNotifications(result.notifications);
     }

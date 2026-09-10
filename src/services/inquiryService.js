@@ -39,6 +39,7 @@ async function sendPrevDayRemind(options = {}) {
   const sent = [];
   const skipped = [];
   for (const rec of recs) {
+    if (rec.status) { skipped.push({ name: rec.name, reason: `状态已是「${rec.status}」` }); continue; }
     const member = roster.findByName(rec.name);
     if (!member || !member.openId) {
       skipped.push({ name: rec.name || '（未绑定）', reason: '未绑定账号' });
@@ -108,11 +109,16 @@ async function askToday(options = {}) {
   return { date, asked, skipped, preview: asked.map((a) => `${a.name}（${a.position}）`) };
 }
 
-/** 会话里找当日记录（重新查表拿最新状态，会话只作身份与岗位锚点） */
+/** 会话里找当日记录（重新查表拿最新状态，会话只作身份与岗位锚点）。
+ *  日期守卫：过期会话（错过收口的残留）直接清理，晚到的「是/否/照片」一律不认。 */
 async function sessionRecord(openId) {
   const s = state.load();
   const session = s.sessions[openId];
   if (!session) return { session: null, rec: null, member: null };
+  if (session.date !== todayStr()) {
+    state.mutate((st) => { delete st.sessions[openId]; });
+    return { session: null, rec: null, member: null };
+  }
   const member = roster.findByOpenId(openId);
   const recs = await dutyTable.getRecordsByDate(session.date);
   const rec = recs.find((r) => r.recordId === session.recordId) || null;
@@ -170,12 +176,8 @@ async function handleImage({ openId, imageKey, messageId }) {
   const buf = await client.downloadImage(imageKey);
   const fileName = `duty_${session.date}_${session.position}_${session.name}_${(messageId || Date.now()).toString().slice(-8)}.jpg`;
   const fileToken = await client.uploadMediaToBitable(buf, fileName);
-  await dutyTable.appendReceipt(rec.recordId, session.position, fileToken);
-
-  const fresh = await dutyTable.getRecordsByDate(session.date);
-  const current = fresh.find((r) => r.recordId === rec.recordId);
-  const count = current ? (current.receiptCounts[session.position] || 0) : 0;
-  const doneMarked = current && current.status === config.status.DONE;
+  const count = await dutyTable.appendReceipt(rec.recordId, session.position, fileToken);
+  const doneMarked = rec.status === config.status.DONE;
   return {
     handled: true,
     reply: `📸 已收到第 ${count} 张照片，写入「${session.position}」凭证栏。`
@@ -225,11 +227,12 @@ async function closeToday(options = {}) {
         compensation.handleAbsence(rec.name, date, config.status.MISS);
       }
     }
-    // 清空当日会话
+    // 清空当日会话并记录收口水位（供 00:30 对账补收口判断）
     state.mutate((s) => {
       for (const [openId, session] of Object.entries(s.sessions)) {
         if (session.date === date) delete s.sessions[openId];
       }
+      s.lastCloseDate = date;
     });
   }
 

@@ -19,7 +19,7 @@
   `{command, openId, chatType:'p2p'|'group', chatId?, imageKey?, messageId?, args?}`
   指令清单（精确匹配）：值日助手 / 我要请假 / 查询我的下一次值日 / 绑定 X / 是 / 否 / 生成排班表(admin)；
   图片载荷：`{type:'image', openId, imageKey, messageId}`（hub 不做下载转存，由本项目处理）。
-- duty-bot → pm-robot：GET /api/duty/brief（昨日结果+今日名单），播报 cron（12:00）由 pm-robot 持有。
+- duty-bot → pm-robot：GET /api/duty/brief（昨日结果+今日名单）；每日播报卡片由 pm-robot 渲染发送（M4 待实施，播报 cron 归 pm-robot）。
 - gateway：默认无登记；如需表格事件即时感知再按消费者登记接入（二期）。
 
 ## 铁律

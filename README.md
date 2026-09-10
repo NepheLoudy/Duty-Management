@@ -127,4 +127,5 @@ npm run table:create    # 自动新建 Bitable+排班表（打印 app_token/tabl
 - ✅ duty-bot 侧 `/api/duty/brief` 与值日助手指令层（hub 转发分支为 M3，与 hub 同批上线）
 - ⬜ M3 hub 转发（chatService 值日分支 + p2p 图片最小转发 + 群看板）
 - ⬜ M4 pm-robot `runDutyBroadcast`（新群 12:00 卡片：昨日结果+今日名单+语录）
-- ⬜ M5 首次 `npm run push` 上线 + 顶层 AGENTS.md/DEVLOG 联动归档
+- ✅ M5 首次 `npm run push` 上线（2026-09-11，仓库 Duty-Management，NAS pm2 duty-bot）+ 顶层 AGENTS.md/DEVLOG 联动归档
+- ⬜ M3 hub 转发分支已上线（v65），待表格/名册就绪后全链路真机验收

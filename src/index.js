@@ -2,6 +2,7 @@ const express = require('express');
 const cors = require('cors');
 const config = require('./config');
 const roster = require('./services/rosterService');
+const state = require('./services/stateStore');
 const assistant = require('./services/assistantService');
 const scheduleService = require('./services/scheduleService');
 const inquiry = require('./services/inquiryService');
@@ -28,13 +29,32 @@ app.get('/api/health', (req, res) => {
 
 // ---------- 指令转发端点（approval-bot / bambu 同款契约，hub 调用） ----------
 // 请求体：
-//   文本指令 {command, openId, chatType:'p2p'|'group', chatId?, args?}
+//   文本指令 {command, openId, chatType:'p2p'|'group', chatId?, messageId?, args?}
 //   图片载荷 {type:'image', openId, imageKey, messageId}
 // 返回：{reply}；reply 为空串表示已自行处理（如群看板卡片），hub 可跳过发送
+
+// 消息级幂等（webhook/网关重投防双计：同一句「我要请假」触发两次会双倍登记补偿义务）
+const seenMessages = new Map(); // messageId -> firstSeenAt
+const SEEN_TTL_MS = 10 * 60 * 1000;
+function isDuplicateMessage(messageId) {
+  if (!messageId) return false;
+  const now = Date.now();
+  for (const [k, t] of seenMessages) {
+    if (now - t > SEEN_TTL_MS) seenMessages.delete(k);
+  }
+  if (seenMessages.has(messageId)) return true;
+  seenMessages.set(messageId, now);
+  return false;
+}
 
 app.post('/api/chat/command', async (req, res) => {
   try {
     const body = req.body || {};
+
+    if (isDuplicateMessage(body.messageId)) {
+      console.log('[指令] 重复消息已忽略:', body.messageId);
+      return res.json({ reply: '' });
+    }
 
     if (body.type === 'image') {
       const result = await assistant.handleImagePayload(body);
@@ -86,7 +106,8 @@ app.post('/api/bot/test-ask', async (req, res) => {
 
 app.post('/api/bot/test-close', async (req, res) => {
   try {
-    res.json({ success: true, result: await runClose({ dryRun: !!req.body?.dryRun }) });
+    // 手动触发不受静默限制（bypassQuiet：回执直接发送，不落积压）
+    res.json({ success: true, result: await runClose({ dryRun: !!req.body?.dryRun, bypassQuiet: true }) });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -100,10 +121,12 @@ app.post('/api/bot/test-reconcile', async (req, res) => {
   }
 });
 
-// 排班生成（dryRun=true 只出预览不写表；正式生成建议仍由管理员私信触发）
+// 排班生成（默认 dryRun 只出预览；带 {"confirm":true} 才正式写表。
+// 正式生成建议仍由管理员私信触发，这里主要作预览/核对用）
 app.post('/api/bot/test-generate', async (req, res) => {
   try {
-    const result = await scheduleService.generate({ dryRun: !!req.body?.dryRun });
+    const dryRun = !req.body?.confirm;
+    const result = await scheduleService.generate({ dryRun });
     res.json({ success: true, reply: scheduleService.renderGenerateReply(result), result });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -124,6 +147,7 @@ function startServer() {
   });
 
   roster.validateStartup();
+  state.load(); // 启动即确保状态目录存在（DUTY_STATE_FILE / QUIET_BACKLOG_FILE 同目录场景）
   startCronJobs();
 
   process.on('SIGINT', () => {
