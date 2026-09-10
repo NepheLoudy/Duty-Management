@@ -1,0 +1,93 @@
+const path = require('path');
+require('dotenv').config({ path: path.join(__dirname, '..', '.env') });
+
+function parseArrayConfig(value) {
+  if (!value) return [];
+  return value.split(',').map(v => v.trim()).filter(v => Boolean);
+}
+
+// ============================================================
+// duty-bot（值日提醒机器人）
+// 与所有 qianli 项目共用同一个飞书应用（APP_ID 相同）。
+// 本项目不消费消息事件：队员私信/群指令由 gateway → hub（对话型机器人）
+// 转发到 POST /api/chat/command；定时提醒/收口用应用身份经 Open API 主动发送。
+// 多维表格（排班表）为单一事实来源，轮转状态每次生成时从表格记录反推。
+// ============================================================
+
+const ROOT = path.join(__dirname, '..');
+
+// 三个值日岗位（固定取值，排班算法与表格单选项共用）
+const POSITIONS = ['总负责', '工位区', '装配区'];
+
+// 完成状态单选取值（与表格「完成状态」字段的选项一致）
+const STATUS = {
+  DONE: '已做完',
+  LEAVE: '已请假',
+  MISS: '未做完',
+};
+
+// 当日总状态唯一取值：三个附件栏各有照片且三条记录均为已做完时写入
+const DAY_STATUS_DONE = '今日完成值日';
+
+module.exports = {
+  port: process.env.PORT || 3006,
+
+  feishu: {
+    appId: process.env.APP_ID || '',
+    appSecret: process.env.APP_SECRET || '',
+  },
+
+  bitable: {
+    appToken: process.env.DUTY_BITABLE_APP_TOKEN || '',
+    tableId: process.env.BITABLE_DUTY_TABLE_ID || '',
+  },
+
+  // 表字段名映射（手动建表字段名不同时只改 .env，不动代码）
+  fields: {
+    user: process.env.DUTY_FIELD_USER || '人员',
+    name: process.env.DUTY_FIELD_NAME || '姓名',
+    date: process.env.DUTY_FIELD_DATE || '日期',
+    position: process.env.DUTY_FIELD_POSITION || '岗位',
+    status: process.env.DUTY_FIELD_STATUS || '完成状态',
+    dayStatus: process.env.DUTY_FIELD_DAY_STATUS || '当日总状态',
+    receipts: {
+      '总负责': process.env.DUTY_FIELD_RECEIPT_LEADER || '凭证-负责',
+      '工位区': process.env.DUTY_FIELD_RECEIPT_WORKSTATION || '凭证-工位',
+      '装配区': process.env.DUTY_FIELD_RECEIPT_ASSEMBLY || '凭证-装配',
+    },
+  },
+
+  positions: POSITIONS,
+  status: STATUS,
+  dayStatusDone: DAY_STATUS_DONE,
+
+  // 本地名册/白名单（真实文件含姓名与 open_id，永不进 git，仓库只保留 *.example.json）
+  membersFile: process.env.DUTY_MEMBERS_FILE || path.join(ROOT, 'config', 'members.json'),
+  whitelistFile: process.env.DUTY_WHITELIST_FILE || path.join(ROOT, 'config', 'whitelist.json'),
+
+  // 排班生成权限：显式配置优先，否则取名册里 admin:true 的成员
+  adminOpenIds: parseArrayConfig(process.env.DUTY_ADMIN_OPEN_IDS),
+
+  schedule: {
+    prevRemind: process.env.DUTY_PREV_REMIND_SCHEDULE || '0 0 20 * * *',
+    ask: process.env.DUTY_ASK_SCHEDULE || '0 30 18 * * *',
+    deadline: process.env.DUTY_DEADLINE_SCHEDULE || '0 0 22 * * *',
+    reconcile: process.env.DUTY_RECONCILE_SCHEDULE || '0 30 0 * * *',
+  },
+
+  generate: {
+    // 每次生成的跨度（日历月数，从最后一个已排日期的次日起）
+    months: Math.max(1, parseInt(process.env.DUTY_GENERATE_MONTHS, 10) || 1),
+    // 同一人两次值日的最小间隔天数（软约束，候选不足时自动放宽）
+    minIntervalDays: parseInt(process.env.DUTY_MIN_INTERVAL_DAYS, 10) || 2,
+  },
+
+  board: {
+    // 群内「值日助手」看板限流（毫秒，每群一次）
+    rateLimitMs: (parseInt(process.env.DUTY_BOARD_RATE_LIMIT_MINUTES, 10) || 60) * 60 * 1000,
+  },
+
+  // 运行时状态（监听会话/补偿义务/看板限流时间戳/连续缺勤计数）
+  // 生产环境必须配到项目目录之外（SFTP 部署会清空 /opt/duty-bot）
+  stateFile: process.env.DUTY_STATE_FILE || path.join(ROOT, '.duty-state.json'),
+};

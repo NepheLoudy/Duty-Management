@@ -1,0 +1,34 @@
+{
+  "name": "duty-bot",
+  "version": "1.0.0",
+  "description": "值日提醒机器人 - 值日排班轮转/私信提醒收口/照片凭证写表",
+  "main": "src/index.js",
+  "scripts": {
+    "start": "node src/index.js",
+    "dev": "nodemon src/index.js",
+    "deploy": "node push.js",
+    "push": "node push.js",
+    "test:schedule": "node scripts/stub-test-schedule.js",
+    "test:flow": "node scripts/stub-test-flow.js",
+    "table:check": "node scripts/init-duty-table.js",
+    "table:create": "node scripts/init-duty-table.js --create"
+  },
+  "keywords": [
+    "feishu",
+    "duty",
+    "bitable",
+    "schedule"
+  ],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.5",
+    "express": "^4.19.2",
+    "node-cron": "^3.0.3",
+    "ssh2": "^1.17.0"
+  },
+  "devDependencies": {
+    "nodemon": "^3.1.0"
+  }
+}

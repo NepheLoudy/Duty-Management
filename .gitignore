@@ -1,0 +1,32 @@
+# 依赖
+node_modules/
+
+# 环境变量（含飞书凭证，严禁提交）
+.env
+.env.local
+.env.*.local
+
+# 真实名册与白名单（含真实姓名/open_id，严禁提交；仓库只保留 *.example.json 模板）
+config/members.json
+config/whitelist.json
+
+# 运行时状态（含会话/补偿义务等，勿提交）
+.duty-state.json
+.quiet-backlog.json
+
+# 日志
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# 运行时
+.DS_Store
+Thumbs.db
+data/
+
+# 编辑器
+.vscode/
+.idea/
+*.swp
+*.swo

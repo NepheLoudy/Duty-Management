@@ -1,0 +1,7 @@
+{
+  "members": [
+    { "name": "队员A", "openId": "ou_xxxxxxxxxxxxxxxxxxxxxxxx", "admin": true },
+    { "name": "队员B", "openId": "ou_yyyyyyyyyyyyyyyyyyyyyyyy" },
+    { "name": "队员C", "openId": "" }
+  ]
+}
