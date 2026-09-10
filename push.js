@@ -127,7 +127,7 @@ function exec(cmd, cb) {
 // 部署代码（git 或 SFTP 两种方式）
 async function deployCode() {
   if (gitPushed) {
-    const cmd = 'cd ' + REMOTE_DIR + ' && '
+    const cmd = 'mkdir -p ' + REMOTE_DIR + ' && cd ' + REMOTE_DIR + ' && '
       + 'if [ ! -d .git ]; then git init; fi; '
       + 'git remote set-url origin ' + GIT_REMOTE + ' 2>/dev/null || git remote add origin ' + GIT_REMOTE + '; '
       + 'git fetch origin main && git reset --hard origin/main';
@@ -170,7 +170,7 @@ async function deployCode() {
           process.exit(1);
         }
         console.log('✓ 代码包已上传');
-        const cmd = 'rm -rf ' + REMOTE_DIR + '/.git ' + REMOTE_DIR + '/* ' + REMOTE_DIR + '/.[!.]* 2>/dev/null || true; '
+        const cmd = 'mkdir -p ' + REMOTE_DIR + ' && rm -rf ' + REMOTE_DIR + '/.git ' + REMOTE_DIR + '/* ' + REMOTE_DIR + '/.[!.]* 2>/dev/null || true; '
           + 'tar -xzf ' + TAR_REMOTE + ' -C ' + REMOTE_DIR;
         exec(cmd, () => npmInstall());
       });
