@@ -18,7 +18,7 @@ const policy = require('./policyService');
 // ============================================================
 
 const HELP_TEXT = [
-  '🧹 值日助手用法：',
+  '🧹 值日助手用法（指令带不带 / 都可以）：',
   '· 「查询我的下一次值日」—— 下次值日日期与岗位',
   '· 「我要请假」—— 登记请假（当次置已请假，下周自动补插一次值日）',
   '· 「绑定 姓名」—— 首次使用绑定账号（提醒与确认走私信）',
@@ -86,7 +86,8 @@ async function handleGroupBoard(chatId) {
  * @returns {{handled: boolean, reply: string}}
  */
 async function handleCommand(payload = {}) {
-  const raw = String(payload.command || '').trim();
+  // 统一指令风格：容忍「/前缀」（/值日助手 ≙ 值日助手），与各模块 /指令 风格一致
+  const raw = String(payload.command || '').trim().replace(/^\//, '');
   const openId = payload.openId || '';
   const chatType = payload.chatType === 'group' ? 'group' : 'p2p';
   const args = Array.isArray(payload.args) ? payload.args : [];

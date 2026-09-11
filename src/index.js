@@ -82,6 +82,16 @@ app.get('/api/duty/policy', (req, res) => {
   res.json(policy.getPolicy());
 });
 
+// 管辖范畴在线改写（定制窗口写入口）：{ groupChatIds: ["oc_..."] }（空数组 = 不限制）
+app.post('/api/duty/policy', (req, res) => {
+  const ids = req.body?.groupChatIds;
+  if (!Array.isArray(ids)) return res.status(400).json({ error: 'groupChatIds 必须是数组' });
+  const clean = ids.map((s) => String(s).trim()).filter(Boolean);
+  policy.saveOverride({ groupChatIds: clean });
+  console.log(`[管辖策略] 在线改写：管辖群 ${clean.length} 个`);
+  res.json({ ok: true, policy: policy.getPolicy() });
+});
+
 // ---------- 定制窗口（名册/白名单附属管理，规则见顶层 AGENTS「机器人后端定制窗口」） ----------
 
 // 名册全景（通讯录同步结果 + 绑定/白名单/队列状态）

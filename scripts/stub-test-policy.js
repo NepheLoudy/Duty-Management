@@ -62,8 +62,8 @@ function check(desc, cond, detail = '') {
     && p.hubEnforcement.closeBasicCommands === true
     && p.hubEnforcement.keywordPassthrough === true
     && typeof p.hubEnforcement.fallbackGuidance === 'string' && p.hubEnforcement.fallbackGuidance.includes('值日助手'));
-  check('策略：p2p 指令清单 6 词 + 绑定前缀',
-    p.p2pCommands.length === 6 && JSON.stringify(p.p2pCommandPrefixes) === JSON.stringify(['绑定']),
+  check('策略：p2p 指令清单 6 词×2（裸词+/别名）+ 绑定前缀',
+    p.p2pCommands.length === 12 && JSON.stringify(p.p2pCommandPrefixes) === JSON.stringify(['绑定', '/绑定']),
     JSON.stringify(p.p2pCommands));
 
   // ③ 管辖判定
