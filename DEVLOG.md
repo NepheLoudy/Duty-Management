@@ -37,3 +37,13 @@
 - 此前空档：管理员在表格里手工标记的 已请假/未做完 不会登记补偿（只有私信请假和收口置未做完两条路径会）——新增 `syncAbsenceObligations`：00:30 对账时按 姓名+值日日期+原因 去重补登记（含旧版无 dutyDate 字段义务的宽松兼容），对账报告带「补登记 N 条」提示
 - 义务结构新增 dutyDate 字段（去重键）；group 限制确认：快递申领群即值日播报群（DUTY_CHAT_ID 单键双用，维持现实现）
 - 测试：闭环用例新增「admin 手工标记已请假 → 补登记 → 二次对账去重」3 项，40+3 项全过
+
+### v4 · 2026-09-11 · 316756b · feat
+
+**值日域管辖策略下发——权限管辖范畴/生效范畴归位本项目后端**
+
+- 需求：hub 在值日群的权限口径（管辖哪些群、群里放行什么）此前硬编码在 pm-robot，用户要求这类管辖归位到 duty-bot 后端，hub 只做执行闸门。
+- 新增 `GET /api/duty/policy`（`src/services/policyService.js`）：下发管辖范畴（`.env` 的 `DUTY_GROUP_CHAT_IDS`，留空=不限制）+ 生效范畴（看板触发词、`closeBasicCommands`、`keywordPassthrough`、未命中引导语）+ p2p 指令清单（含 绑定 前缀）。
+- 群看板加管辖校验（防御直调）：非管辖群请求看板静默拒绝（`assistantService`）；看板触发词改为从自身策略取，与下发口径单一来源。
+- 配置：`.env`/`.env.example` 新增 `DUTY_GROUP_CHAT_IDS`（生产=快递申领群）；架构铁律不变——仍不消费消息事件，策略只是 HTTP 下发。
+- 回归：新增 `npm run test:policy`（10 项断言：策略结构/管辖判定/看板拒绝与放行/HTTP 端点）；test:flow 补 `DUTY_GROUP_CHAT_IDS=''` 隔离（防真实 .env 管辖列表泄漏进测试），flow/schedule 全过。
