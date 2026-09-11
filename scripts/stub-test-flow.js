@@ -165,9 +165,21 @@ function check(desc, cond, detail = '') {
   const pendingOb = state.load().obligations.filter((o) => !o.placed);
   check('请假生成 1 条下周插入义务', pendingOb.length === 1 && pendingOb[0].name === '队员D', JSON.stringify(pendingOb));
 
-  // ---- 7. 对账 ----
+  // ---- 7. 对账（含：admin 手工标记的已请假也要补登记进下周队列） ----
+  {
+    const yesterday = addDays(today, -1);
+    const ids = await dutyTable.createDayRecords(yesterday, [
+      { member: roster.findByName('队员C'), position: '总负责' },
+    ]);
+    // 模拟管理员直接在表格里把该记录标成「已请假」（非私信请假路径）
+    await dutyTable.setStatus(ids[0], '已请假');
+  }
   const recon = await compensation.reconcile({});
-  check('对账：昨日无记录不炸', recon.report.includes('无记录'));
+  const yObl = state.load().obligations.find((o) => o.name === '队员C' && o.dutyDate === addDays(today, -1));
+  check('对账：admin 手工标记的已请假补登记进下周队列', Boolean(yObl), JSON.stringify(state.load().obligations.map((o) => [o.name, o.reason, o.dutyDate])));
+  check('对账：补登记有回执提示', recon.report.includes('补登记 1 条'), recon.report);
+  const recon2 = await compensation.reconcile({});
+  check('对账：同一条手工标记不重复登记（去重）', !recon2.report.includes('补登记'), recon2.report);
   // 队员D 义务就地安置的前提：目标周内存在他没有班次的空位日
   //（4 人小队间隔约束放宽后可能整周天天在班，此时留队为正确行为）
   {
@@ -181,8 +193,8 @@ function check(desc, cond, detail = '') {
       if (!dDays.has(d)) hasFreeDay = true;
     }
     check('对账：队员D 义务按目标周空位情况正确处置',
-      hasFreeDay ? recon.stillQueued.length === 0 : recon.stillQueued.length === 1,
-      `hasFreeDay=${hasFreeDay} queued=${recon.stillQueued.length}`);
+      hasFreeDay ? recon2.stillQueued.length === 0 : recon2.stillQueued.length === 1,
+      `hasFreeDay=${hasFreeDay} queued=${recon2.stillQueued.length}`);
   }
 
   // ---- 8. 值日助手指令 ----
@@ -215,7 +227,7 @@ function check(desc, cond, detail = '') {
 
   // ---- 9. brief 数据接口 ----
   const brief = await scheduleService.getBrief();
-  check('brief：昨日为空、今日 3 人', brief.yesterday.members.length === 0 && brief.today.members.length === 3, JSON.stringify(brief.today));
+  check('brief：昨日 1 人（对账补的记录）、今日 3 人', brief.yesterday.members.length === 1 && brief.today.members.length === 3, JSON.stringify(brief.today));
   check('brief：昨日 dayStatus=null（未完成口径）', brief.yesterday.dayStatus === null);
 
   console.log(failed === 0 ? `\n全部通过 ✅（临时目录 ${TMP}）` : `\n${failed} 项失败 ❌`);

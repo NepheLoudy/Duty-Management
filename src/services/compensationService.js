@@ -37,6 +37,7 @@ function handleAbsence(memberName, dutyDateStr, reason) {
     const created = [{
       id: newId(),
       name: memberName,
+      dutyDate: dutyDateStr,
       weekStart,
       reason,
       placed: false,
@@ -47,6 +48,7 @@ function handleAbsence(memberName, dutyDateStr, reason) {
       created.push({
         id: newId(),
         name: memberName,
+        dutyDate: dutyDateStr,
         weekStart,
         reason: `${reason}（连续两次缺勤加罚）`,
         placed: false,
@@ -58,6 +60,44 @@ function handleAbsence(memberName, dutyDateStr, reason) {
     s.absenceStreaks[memberName] = streak;
     s.obligations.push(...created);
     return { created, penalty, streak: streak.count };
+  });
+}
+
+/**
+ * 缺勤补偿同步：把「已请假 / 未做完」两类记录都补进下周插入队列。
+ * 覆盖所有来源——私信请假/收口置未做完（当时已登记，按 姓名+值日日期+原因 去重跳过）、
+ * 管理员在表格里手工标记的状态（此前不会登记补偿，这里补上）。
+ * @param {string} dutyDateStr 值日日期
+ * @param {Array<{name: string, status: string}>} records 该日记录（归一化结构）
+ * @returns {number} 新登记的义务条数
+ */
+function syncAbsenceObligations(dutyDateStr, records) {
+  const weekStart = addDays(mondayOf(dutyDateStr), 7);
+  const absent = records.filter(
+    (r) => r.name && (r.status === config.status.LEAVE || r.status === config.status.MISS)
+  );
+  if (absent.length === 0) return 0;
+
+  return state.mutate((s) => {
+    let created = 0;
+    for (const rec of absent) {
+      const exists = (s.obligations || []).some(
+        // 旧版义务没有 dutyDate 字段：按 姓名+原因 宽松匹配，避免重复登记
+        (o) => o.name === rec.name && (o.dutyDate === undefined || o.dutyDate === dutyDateStr) && o.reason.startsWith(rec.status)
+      );
+      if (exists) continue;
+      s.obligations.push({
+        id: newId(),
+        name: rec.name,
+        dutyDate: dutyDateStr,
+        weekStart,
+        reason: rec.status,
+        placed: false,
+        createdAt: new Date().toISOString(),
+      });
+      created += 1;
+    }
+    return created;
   });
 }
 
@@ -213,14 +253,17 @@ async function reconcile(options = {}) {
     dayStatusChanged = true;
   }
 
-  // 3) 已完成值日的成员，连续缺勤计数清零
+  // 3) 缺勤补偿同步：昨日记录中「已请假 / 未做完」两类（含 admin 手工改的状态）都进下周队列
+  const syncedCount = syncAbsenceObligations(yesterday, recs);
+
+  // 4) 昨日已完成值日的成员，连续缺勤计数清零
   if (!dryRun) {
     for (const r of recs) {
       if (r.status === config.status.DONE) resetStreak(r.name);
     }
   }
 
-  // 4) 补偿义务安置
+  // 5) 补偿义务安置
   const { placed, stillQueued, expired } = await placePending({ dryRun });
 
   const lines = [
@@ -230,7 +273,7 @@ async function reconcile(options = {}) {
   for (const b of backfilled) {
     lines.push(`- ⚠️ 补收口 ${b.date}：${b.count} 人未确认已置未做完（${b.names.join('、')}），补偿义务已登记`);
   }
-  lines.push(`- 补偿插入：本次安置 ${placed.length} 条，排队中 ${stillQueued.length} 条${expired.length ? `，过期标记 ${expired.length} 条（目标周已过去，请人工裁决）` : ''}`);
+  lines.push(`- 补偿插入：本次安置 ${placed.length} 条，排队中 ${stillQueued.length} 条${expired.length ? `，过期标记 ${expired.length} 条（目标周已过去，请人工裁决）` : ''}${syncedCount ? `，补登记 ${syncedCount} 条（表格手工标记的请假/未做完）` : ''}`);
   for (const p of placed) {
     lines.push(`  · ${p.name} → ${p.plan.dateStr} ${p.plan.position}（${p.reason}）`);
   }
@@ -249,4 +292,4 @@ async function reconcile(options = {}) {
   return { dayStatusChanged, yesterdayStatus: target, backfilled, placed, stillQueued, expired, report };
 }
 
-module.exports = { handleAbsence, resetStreak, placePending, reconcile };
+module.exports = { handleAbsence, resetStreak, placePending, reconcile, syncAbsenceObligations };
