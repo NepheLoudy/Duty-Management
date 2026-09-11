@@ -47,3 +47,14 @@
 - 群看板加管辖校验（防御直调）：非管辖群请求看板静默拒绝（`assistantService`）；看板触发词改为从自身策略取，与下发口径单一来源。
 - 配置：`.env`/`.env.example` 新增 `DUTY_GROUP_CHAT_IDS`（生产=快递申领群）；架构铁律不变——仍不消费消息事件，策略只是 HTTP 下发。
 - 回归：新增 `npm run test:policy`（10 项断言：策略结构/管辖判定/看板拒绝与放行/HTTP 端点）；test:flow 补 `DUTY_GROUP_CHAT_IDS=''` 隔离（防真实 .env 管辖列表泄漏进测试），flow/schedule 全过。
+
+
+### v5 · 2026-09-11 · d57aa0f · feat
+
+**表格接线——值日看板表接入（M0 表格项完成）**
+
+- `.env` 回填 `DUTY_BITABLE_APP_TOKEN`（机器人项目看板库）/ `BITABLE_DUTY_TABLE_ID`（值日看板表 tblhws89lrituaks），并按实际列名写全 `DUTY_FIELD_*` 映射：人员(人员类型主键)/姓名/值日时间/负责区域/附件1·2·3/完成状态/该组总状态。
+- 表结构补齐（应用身份直接操作）：新建文本「姓名」列（duty-bot 写姓名与名册匹配的 join 键，原表缺失）；「负责区域」「完成状态」预置单选选项（总负责/工位区/装配区、已做完/已请假/未做完）。列名不改动用户原表命名，全部走 env 映射。
+- `scripts/init-duty-table.js`：`该组总状态` 类型断言放宽为文本/单选皆收（`types` 数组），选项校验仅对单选生效——生产表该列为文本，运行时写「今日完成值日」不受影响。
+- 验证：`npm run table:check` 9 字段全过（5 条空壳记录无日期自动忽略）；test:flow / test:policy 回归全过；NAS 实测 `/api/duty/brief` 读表正常、`/api/bot/test-generate` dryRun 正常、health 200。
+- 遗留：名册仅 1 人（已绑定+admin），**排班生成前必须补全 config/members.json 并让队员发「绑定 姓名」**，否则排班会全压到一人。
