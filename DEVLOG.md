@@ -71,3 +71,12 @@
 - 踩坑：`users/find_by_department` 的 page_size 上限 50，写 100 触发 99992402 field validation failed（9bbea91 修复）；本地探测通过 ≠ 参数合法，部署后必须实测同步。
 - 测试：新增 `npm run test:roster`（10 项：同步写回/admin 保留/dept 合并/白名单增删/四个窗口）；flow 测试补 contacts stub；schedule/policy 回归全过。
 - NAS 实测：同步 63 人（12 部门、全部自带 open_id、admin 保留 1）；四窗口 200。
+
+### v7 · 2026-09-11 · 95f92b6 · feat
+
+**指令风格统一（/别名全等效）+ 管辖策略在线改写**
+
+- 统一指令风格：`assistantService.handleCommand` 统一去 `/` 前缀——「/值日助手」「/我要请假」「/绑定 X」等与裸词完全等效，与各模块 /指令 风格一致；HELP 文案注明「带不带 / 都可以」。
+- 管辖策略可写：新增 `POST /api/duty/policy`（`{groupChatIds:[...]}`，空数组=不限制），写 `config/policy-override.json`（gitignore）在线改写管辖范畴，`getPolicy` 优先读 override、回落 env；`getPolicy`/`isManagedGroup` 改为即时读取（hub 消费端 60s 缓存内跟随）。运维台 duty 卡片已内置管辖群编辑框。
+- 策略清单同步：p2pCommands 含裸词 + / 变体（hub 的 isDutyCommandText 直接放行斜杠形态）。
+- 回归：test:policy 断言更新（12 词 + 双前缀）全过；flow/roster/schedule 全过。NAS 实测 POST 写入口 ok、`/值日助手` 斜杠形态群看板正常。
