@@ -82,6 +82,50 @@ app.get('/api/duty/policy', (req, res) => {
   res.json(policy.getPolicy());
 });
 
+// ---------- 定制窗口（名册/白名单附属管理，规则见顶层 AGENTS「机器人后端定制窗口」） ----------
+
+// 名册全景（通讯录同步结果 + 绑定/白名单/队列状态）
+app.get('/api/duty/roster', (req, res) => {
+  const members = roster.getMembers();
+  const whitelist = new Set(roster.loadWhitelistNames());
+  const items = members.map((m) => ({
+    name: m.name,
+    dept: m.dept || '',
+    admin: !!m.admin,
+    bound: !!m.openId,
+    whitelisted: whitelist.has(m.name),
+    inQueue: !whitelist.has(m.name),
+  }));
+  res.json({
+    total: items.length,
+    queue: items.filter((i) => i.inQueue).length,
+    bound: items.filter((i) => i.bound).length,
+    members: items,
+  });
+});
+
+// 手动触发通讯录同步（启动/生成排班前也会自动同步）
+app.post('/api/duty/roster/refresh', async (req, res) => {
+  try {
+    const members = await roster.syncFromContacts();
+    res.json({ success: true, total: members.length });
+  } catch (err) {
+    console.error('[名册] 手动同步失败:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// 白名单（值日排除名单）查看与增删
+app.get('/api/duty/whitelist', (req, res) => {
+  res.json({ names: roster.loadWhitelistNames() });
+});
+
+app.post('/api/duty/whitelist', (req, res) => {
+  const { add = [], remove = [] } = req.body || {};
+  const names = roster.updateWhitelist({ add, remove });
+  res.json({ success: true, names });
+});
+
 // ---------- 对外数据接口（pm-robot 每日值日播报数据源） ----------
 // { yesterday: {date, dayStatus, members:[{name, position, status, hasReceipt}]},
 //   today: {date, members:[{name, position}]} }
@@ -159,6 +203,14 @@ function startServer() {
   roster.validateStartup();
   state.load(); // 启动即确保状态目录存在（DUTY_STATE_FILE / QUIET_BACKLOG_FILE 同目录场景）
   startCronJobs();
+
+  // 启动即同步通讯录名册（失败沿用本地名册，不阻断启动；同步后再校验一次输出准确人数）
+  roster.syncFromContacts()
+    .then(() => roster.validateStartup())
+    .catch((err) => {
+      console.error('[名册] 通讯录同步失败（沿用本地名册）:', err.message);
+      roster.validateStartup();
+    });
 
   process.on('SIGINT', () => {
     console.log('\n正在关闭服务器...');

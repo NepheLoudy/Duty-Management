@@ -1,12 +1,13 @@
 const fs = require('fs');
 const config = require('../config');
+const contacts = require('../feishu/contacts');
 
 // ============================================================
 // 名册与白名单（本地 JSON，账号 open_id 为主键）
-// - config/members.json：真实名册，永不进 git（仓库只保留 members.example.json）
-//   { members: [{ name, openId, admin? }] }
-//   openId 为空的成员照常排班（表格按姓名），但跳过私信提醒并标注「未绑定」，
-//   其本人可私信「绑定 姓名」完成绑定（绑定即时写回名册文件）。
+// - config/members.json：名册，启动/生成排班时自动从飞书通讯录同步（contacts.js），
+//   open_id 直接来自组织架构，「绑定 姓名」降级为人工纠错兜底；admin 标记按姓名保留。
+//   { members: [{ name, openId, dept?, admin? }] }
+//   openId 为空的成员照常排班（表格按姓名），但跳过私信提醒并标注「未绑定」。
 // - config/whitelist.json：白名单只写人名，零门槛维护
 //   { names: ["某人"] }，系统按姓名映射到名册后从值日队列排除。
 // ============================================================
@@ -14,7 +15,7 @@ const config = require('../config');
 function loadMembers() {
   try {
     if (!fs.existsSync(config.membersFile)) {
-      console.warn(`[名册] 未找到名册文件 ${config.membersFile}，请照 config/members.example.json 创建`);
+      console.warn(`[名册] 未找到名册文件 ${config.membersFile}（启动通讯录同步会自动生成）`);
       return [];
     }
     const data = JSON.parse(fs.readFileSync(config.membersFile, 'utf-8'));
@@ -24,6 +25,7 @@ function loadMembers() {
       .map((m) => ({
         name: m.name.trim(),
         openId: (m.openId || '').trim(),
+        dept: (m.dept || '').trim(),
         admin: Boolean(m.admin),
       }));
   } catch (err) {
@@ -78,7 +80,44 @@ function isAdminOpenId(openId) {
 }
 
 /**
+ * 通讯录同步：全租户部门成员 → members.json（open_id 直取自组织架构，无需逐人绑定）。
+ * 已有名册里的 admin 标记按姓名保留；通讯录为空/失败时抛错由调用方兜底（不写坏本地名册）。
+ * @returns {Array<{name, openId, dept, admin}>}
+ */
+async function syncFromContacts() {
+  const users = await contacts.listAllUsers();
+  if (users.length === 0) throw new Error('通讯录返回为空，跳过写回（保留本地名册）');
+  let existing = [];
+  try {
+    const raw = JSON.parse(fs.readFileSync(config.membersFile, 'utf-8'));
+    existing = Array.isArray(raw.members) ? raw.members : [];
+  } catch { /* 无名册/不可读：全新生成 */ }
+  const adminByName = new Set(existing.filter((m) => m && m.admin).map((m) => m.name));
+  const members = users.map((u) => ({
+    name: u.name,
+    openId: u.openId,
+    dept: u.departments || '',
+    admin: adminByName.has(u.name),
+  }));
+  fs.writeFileSync(config.membersFile, JSON.stringify({ members }, null, 2));
+  console.log(`[名册] 通讯录同步完成：共 ${members.length} 人（admin 标记保留 ${members.filter((m) => m.admin).length} 个）`);
+  return members;
+}
+
+/** 白名单增删（定制窗口用）：add/remove 人名数组，返回更新后的完整名单 */
+function updateWhitelist({ add = [], remove = [] } = {}) {
+  const names = new Set(loadWhitelistNames());
+  for (const n of add) if (String(n).trim()) names.add(String(n).trim());
+  for (const n of remove) names.delete(String(n).trim());
+  const list = [...names];
+  fs.writeFileSync(config.whitelistFile, JSON.stringify({ names: list }, null, 2));
+  console.log(`[名册] 白名单已更新：${list.length} 人`);
+  return list;
+}
+
+/**
  * 绑定：把 open_id 写回名册里同名成员（值日助手「绑定 姓名」通道）。
+ * 通讯录同步后 open_id 随名册自带，此通道仅作人工纠错兜底。
  * @returns {{ok: boolean, message: string}}
  */
 function bindOpenId(name, openId) {
@@ -136,5 +175,7 @@ module.exports = {
   getAdminOpenIds,
   isAdminOpenId,
   bindOpenId,
+  syncFromContacts,
+  updateWhitelist,
   validateStartup,
 };

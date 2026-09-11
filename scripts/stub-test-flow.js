@@ -31,6 +31,14 @@ process.env.DUTY_STATE_FILE = path.join(TMP, 'state.json');
 process.env.DUTY_GROUP_CHAT_IDS = '';
 
 // ---- stub 注入（先于服务模块加载） ----
+// 通讯录 stub：名册同步回显当前名册文件（openId 原样保留，未绑定仍为空，测试语义不变）
+require.cache[require.resolve('../src/feishu/contacts')] = {
+  id: 'contacts-stub', filename: 'contacts-stub', loaded: true,
+  exports: { async listAllUsers() {
+    const raw = JSON.parse(fs.readFileSync(MEMBERS_FILE, 'utf-8'));
+    return (raw.members || []).map((m) => ({ name: m.name, openId: m.openId || '', departments: '测试组' }));
+  } },
+};
 const memory = { records: [], seq: 1, dmCalls: [], cards: [], fileTokens: [] };
 
 require.cache[require.resolve('../src/feishu/bitable')] = {

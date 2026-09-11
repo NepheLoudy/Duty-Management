@@ -48,9 +48,15 @@ async function generate(options = {}) {
   const stateData = state.load();
   const insertions = collectPendingInsertions(stateData, startDate, endDate);
 
+  // 生成前刷新通讯录名册（失败沿用本地名册，不阻断生成）
+  try {
+    await roster.syncFromContacts();
+  } catch (err) {
+    console.error('[名册] 生成前同步通讯录失败，沿用本地名册:', err.message);
+  }
   const members = roster.getQueue();
   if (members.length === 0) {
-    throw new Error('值日队列为空：请先在 config/members.json 落名册（并核对白名单）');
+    throw new Error('值日队列为空：请核对通讯录同步结果与白名单');
   }
 
   const result = algo.generateSchedule({
