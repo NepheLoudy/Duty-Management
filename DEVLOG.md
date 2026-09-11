@@ -91,3 +91,11 @@
 - 分工边界更新：今日值日看板自动播报归 duty-bot（AGENTS.md 职能/联动契约已同步）；M4「昨日值日播报」卡片（昨日结果+语录）仍规划在 pm-robot（待实施）。
 - 测试：新增 `npm run test:board`（15 项：payload 形状/签名规则/code!=0 与非 JSON 报错/旧版 StatusCode/通道选择/限流/回退/播报 dryRun/播报实发/无记录与未配置跳过），本地 http 服务实测；其余 stub 回归全过。
 - 待办：NAS `.env` 回填 `DUTY_BOARD_WEBHOOK_URL`（值日播报群 webhook，duty-bot-plan.md 有记录）后 `npm run push`；上线后 `test-board` dryRun→confirm 验证卡面。
+
+### v8 · 2026-09-11 · 58237b8 · fix
+
+**通讯录同步瞬时失败自动重试**
+
+- 排查用户反馈「手动刷新通讯录没用」：同步整链约 17 次飞书出站调用，任何一次网络抖动即整轮失败（与 ticket-bot 接单回执瞬断同源），面板只弹失败 toast。
+- 修复：`syncFromContacts` 失败后 1.5s 自动重试一次，重试仍失败才抛错兜底。
+- 配套：运维台代理超时 12s→30s（实测同步 ~6s）、刷新按钮加忙碌态并在成功后自动展示名册全景。
