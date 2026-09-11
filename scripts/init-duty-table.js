@@ -31,7 +31,7 @@ function expectedFields() {
       field_name: config.fields.status, type: 3,
       options: [config.status.DONE, config.status.LEAVE, config.status.MISS],
     },
-    { field_name: config.fields.dayStatus, type: 3, options: [config.dayStatusDone] },
+    { field_name: config.fields.dayStatus, type: 3, types: [1, 3], options: [config.dayStatusDone] }, // 生产表为文本列，单选亦可
   ];
 }
 
@@ -54,12 +54,13 @@ async function check() {
       missing += 1;
       continue;
     }
-    if (actual.type !== exp.type) {
-      console.error(`❌ 字段「${exp.field_name}」类型不符：期望 ${TYPE_NAMES[exp.type]}，实际 ${TYPE_NAMES[actual.type] || actual.type}`);
+    const expectTypes = exp.types || [exp.type];
+    if (!expectTypes.includes(actual.type)) {
+      console.error(`❌ 字段「${exp.field_name}」类型不符：期望 ${expectTypes.map((t) => TYPE_NAMES[t]).join(' 或 ')}，实际 ${TYPE_NAMES[actual.type] || actual.type}`);
       wrongType += 1;
     } else {
       const options = actual.property?.options?.map((o) => o.name) || [];
-      if (exp.options && exp.options.some((o) => !options.includes(o))) {
+      if (exp.options && actual.type === 3 && exp.options.some((o) => !options.includes(o))) {
         console.warn(`⚠️ 单选「${exp.field_name}」缺选项：${exp.options.filter((o) => !options.includes(o)).join('/')}（运行时写入会自动带出，建议补全）`);
       } else {
         console.log(`✓ ${exp.field_name}（${TYPE_NAMES[actual.type]}）`);
