@@ -16,7 +16,7 @@ async function listAllUsers() {
   for (const deptId of deptNameById.keys()) {
     let pageToken = '';
     do {
-      const query = new URLSearchParams({ department_id: deptId, user_id_type: 'open_id', page_size: '100' });
+      const query = new URLSearchParams({ department_id: deptId, user_id_type: 'open_id', page_size: '50' }); // 该接口 page_size 上限 50
       if (pageToken) query.set('page_token', pageToken);
       const res = await requestAPI('GET', `/contact/v3/users/find_by_department?${query.toString()}`);
       if (res.code !== 0) throw new Error(`拉取部门「${deptNameById.get(deptId)}」成员失败: ${res.msg} (${res.code})`);
