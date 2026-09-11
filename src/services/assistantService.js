@@ -1,6 +1,7 @@
 const config = require('../config');
 const { todayStr } = require('../utils/dates');
 const bot = require('../feishu/bot');
+const webhook = require('../feishu/webhook');
 const roster = require('./rosterService');
 const state = require('./stateStore');
 const dutyTable = require('./dutyTableService');
@@ -13,7 +14,10 @@ const policy = require('./policyService');
 // - 私信（精确匹配）：值日助手 / 我要请假 / 查询我的下一次值日 / 绑定 X /
 //   是 / 否 / 生成排班表（仅名册 admin）
 // - 群聊（@机器人 值日助手）：今日值日状态看板卡片，每群 1 小时限流一次，
-//   命中限流静默
+//   命中限流静默；发送通道为群自定义机器人 webhook（非对话型），
+//   未配置 DUTY_BOARD_WEBHOOK_URL 时回退应用身份 im API 直发
+// - 看板自动播报：每日 12:00（cron）经 webhook 推同一张今日值日看板卡
+//   （broadcastTodayBoard，/api/bot/test-board 手动触发共用）
 // - 图片载荷：{type:'image', openId, imageKey, messageId}
 // ============================================================
 
@@ -54,7 +58,7 @@ function buildBoardCard(dateStr, records) {
       { tag: 'hr' },
       { tag: 'markdown', content: lines.join('\n') },
       { tag: 'hr' },
-      { tag: 'markdown', content: '> 私信我「值日助手」可查询排班、请假；完成后回复「是」并上传照片，22:00 收口。' },
+      { tag: 'markdown', content: '> 私信值日对话机器人「值日助手」可查询排班、请假；完成后回复「是」并上传照片，22:00 收口。' },
     ],
   };
 }
@@ -73,12 +77,48 @@ async function handleGroupBoard(chatId) {
 
   try {
     const records = await dutyTable.getRecordsByDate(todayStr());
-    await bot.sendCardToChat(chatId, buildBoardCard(todayStr(), records));
+    const card = buildBoardCard(todayStr(), records);
+    if (config.board.webhookUrl) {
+      // 主通道：群自定义机器人 webhook（非对话型）；限流仍按来源群 chatId 计
+      await webhook.sendCardToWebhook(config.board.webhookUrl, config.board.webhookSecret, card);
+    } else {
+      console.warn('[看板] 未配置 DUTY_BOARD_WEBHOOK_URL，回退应用身份 im API 直发');
+      await bot.sendCardToChat(chatId, card);
+    }
     return { handled: true, rateLimited: false, reply: '' };
   } catch (err) {
     state.mutate((st) => { delete st.boards[chatId]; }); // 发卡失败回滚，下次可重试
     throw err;
   }
+}
+
+/**
+ * 每日自动播报（cron 12:00，POST /api/bot/test-board 手动触发共用）：
+ * 今日值日看板卡片经群自定义机器人 webhook 推到值日播报群。
+ * 无排班记录/未配置 webhook 时跳过；dryRun 只回预览不发送。
+ */
+async function broadcastTodayBoard({ dryRun = false } = {}) {
+  if (!config.board.webhookUrl) {
+    console.warn('[看板播报] 未配置 DUTY_BOARD_WEBHOOK_URL，自动播报跳过');
+    return { skipped: true, reason: 'webhook_not_configured' };
+  }
+  const records = await dutyTable.getRecordsByDate(todayStr());
+  if (!records.length) {
+    console.log('[看板播报] 今日无排班记录，跳过');
+    return { skipped: true, reason: 'no_records', date: todayStr() };
+  }
+  const card = buildBoardCard(todayStr(), records);
+  if (dryRun) {
+    return {
+      skipped: false,
+      dryRun: true,
+      date: todayStr(),
+      members: records.map((r) => ({ name: r.name, position: r.position, status: r.status || '待定' })),
+    };
+  }
+  await webhook.sendCardToWebhook(config.board.webhookUrl, config.board.webhookSecret, card);
+  console.log(`[看板播报] 今日值日看板已推送（${records.length} 条记录）`);
+  return { skipped: false, via: 'webhook', date: todayStr() };
 }
 
 /**
@@ -174,6 +214,7 @@ module.exports = {
   HELP_TEXT,
   buildBoardCard,
   handleGroupBoard,
+  broadcastTodayBoard,
   handleCommand,
   handleImagePayload,
 };

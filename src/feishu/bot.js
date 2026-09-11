@@ -3,7 +3,8 @@ const { requestAPI } = require('./client');
 // ============================================================
 // 消息发送层（应用身份 IM API）
 // - 定时提醒/询问/收口回执：私信（sendTextToUser）
-// - 群看板（值日助手）：群卡片（sendCardToChat）
+// - 群看板（值日助手）：主通道为群自定义机器人 webhook（feishu/webhook.js），
+//   未配置 DUTY_BOARD_WEBHOOK_URL 时回退本层 sendCardToChat
 // 群播报（昨日值日+今日名单）不在本项目：由 pm-robot 经群 webhook 渲染发送。
 // ============================================================
 
@@ -46,6 +47,7 @@ async function sendTextToChat(chatId, text) {
   return res.data;
 }
 
+/** 群卡片直发（应用身份）——看板通道的回退路径（主通道为群自定义机器人 webhook） */
 async function sendCardToChat(chatId, cardContent) {
   const res = await requestAPI(
     'POST',

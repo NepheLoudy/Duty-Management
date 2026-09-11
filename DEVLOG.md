@@ -80,3 +80,14 @@
 - 管辖策略可写：新增 `POST /api/duty/policy`（`{groupChatIds:[...]}`，空数组=不限制），写 `config/policy-override.json`（gitignore）在线改写管辖范畴，`getPolicy` 优先读 override、回落 env；`getPolicy`/`isManagedGroup` 改为即时读取（hub 消费端 60s 缓存内跟随）。运维台 duty 卡片已内置管辖群编辑框。
 - 策略清单同步：p2pCommands 含裸词 + / 变体（hub 的 isDutyCommandText 直接放行斜杠形态）。
 - 回归：test:policy 断言更新（12 词 + 双前缀）全过；flow/roster/schedule 全过。NAS 实测 POST 写入口 ok、`/值日助手` 斜杠形态群看板正常。
+
+### v8 · 2026-09-11 · 随本提交落地 · feat
+
+**今日值日看板改走 webhook 机器人 + 每日 12:00 看板自动播报**
+
+- 需求：看板模块是给 webhook 机器人做的，不是对话型；且要求每日定时 12:00 自动播报。
+- 通道切换：`handleGroupBoard` 不再默认走应用身份 im API（`sendCardToChat`），改为经群自定义机器人 webhook POST `{msg_type:'interactive', card}`（与 pm-robot DDL 播报同款通道）。新增 `src/feishu/webhook.js`：`sendCardToWebhook(url, secret, card)`，可选签名（HMAC-SHA256，key=`${timestamp}\n${secret}`），兼容旧版 `StatusCode` 应答，15s 超时；webhook 等同群凭据，URL 只落 `.env`。配置 `DUTY_BOARD_WEBHOOK_URL` / `DUTY_BOARD_WEBHOOK_SECRET`（可选），**留空回退 im API 直发**（旧行为不退化）。触发方式、每群 1h 限流、管辖校验、卡片结构均不变；页脚「私信我」改「私信值日对话机器人」。
+- 看板自动播报：新增 `assistantService.broadcastTodayBoard` + cron 第 5 任务 `duty_board_broadcast`（`DUTY_BOARD_BROADCAST_SCHEDULE`，默认 12:00）——今日值日看板卡片经 webhook 推值日播报群，**过 quietHours 闸门**（可重扫任务，静默期积压 09:00 补跑）；无排班记录/未配置 webhook 自动跳过；手动触发 `POST /api/bot/test-board`（默认 dryRun，`{"confirm":true}` 实发，不受静默限制）。
+- 分工边界更新：今日值日看板自动播报归 duty-bot（AGENTS.md 职能/联动契约已同步）；M4「昨日值日播报」卡片（昨日结果+语录）仍规划在 pm-robot（待实施）。
+- 测试：新增 `npm run test:board`（15 项：payload 形状/签名规则/code!=0 与非 JSON 报错/旧版 StatusCode/通道选择/限流/回退/播报 dryRun/播报实发/无记录与未配置跳过），本地 http 服务实测；其余 stub 回归全过。
+- 待办：NAS `.env` 回填 `DUTY_BOARD_WEBHOOK_URL`（值日播报群 webhook，duty-bot-plan.md 有记录）后 `npm run push`；上线后 `test-board` dryRun→confirm 验证卡面。

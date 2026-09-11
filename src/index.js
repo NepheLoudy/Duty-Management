@@ -196,6 +196,17 @@ app.post('/api/bot/test-generate', async (req, res) => {
   }
 });
 
+// 看板自动播报（与 12:00 cron 同一执行链；默认 dryRun 只预览，{"confirm":true} 才实发。
+// 人工当下触发不走静默闸门，与其它 test-* 口径一致）
+app.post('/api/bot/test-board', async (req, res) => {
+  try {
+    const dryRun = !req.body?.confirm;
+    res.json({ success: true, result: await assistant.broadcastTodayBoard({ dryRun }) });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 app.get('/api/bot/cron-status', (req, res) => {
   res.json(getCronStatus());
 });

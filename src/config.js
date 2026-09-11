@@ -73,6 +73,8 @@ module.exports = {
     ask: process.env.DUTY_ASK_SCHEDULE || '0 30 18 * * *',
     deadline: process.env.DUTY_DEADLINE_SCHEDULE || '0 0 22 * * *',
     reconcile: process.env.DUTY_RECONCILE_SCHEDULE || '0 30 0 * * *',
+    // 每日自动播报今日值日看板（群自定义机器人 webhook 通道，过静默闸门）
+    boardBroadcast: process.env.DUTY_BOARD_BROADCAST_SCHEDULE || '0 0 12 * * *',
   },
 
   generate: {
@@ -85,6 +87,10 @@ module.exports = {
   board: {
     // 群内「值日助手」看板限流（毫秒，每群一次）
     rateLimitMs: (parseInt(process.env.DUTY_BOARD_RATE_LIMIT_MINUTES, 10) || 60) * 60 * 1000,
+    // 今日值日看板发送通道：群自定义机器人 webhook（非对话型 im API）；
+    // 留空 = 回退应用身份 im API 直发（旧行为）
+    webhookUrl: process.env.DUTY_BOARD_WEBHOOK_URL || '',
+    webhookSecret: process.env.DUTY_BOARD_WEBHOOK_SECRET || '',
   },
 
   // 值日域管辖策略（权限管辖范畴/生效范畴的单一事实来源在本项目）：

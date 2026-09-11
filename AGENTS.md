@@ -2,7 +2,8 @@
 
 ## 职能
 值日排班生成与轮转/缺勤补偿、值日私信提醒与收口、照片凭证写表、
-值日助手（私信说明/群看板）、对外值日数据接口（/api/duty/brief）、
+值日助手（私信说明/群看板）、**每日值日看板自动播报（12:00，群自定义机器人 webhook）**、
+对外值日数据接口（/api/duty/brief）、
 **值日域管辖策略下发（/api/duty/policy）+ 名册自动读通讯录 + 定制窗口（roster/whitelist）**。
 
 ## 归属信号（需求关键词）
@@ -20,7 +21,9 @@
   `{command, openId, chatType:'p2p'|'group', chatId?, imageKey?, messageId?, args?}`
   指令清单（精确匹配）：值日助手 / 我要请假 / 查询我的下一次值日 / 绑定 X / 是 / 否 / 生成排班表(admin)；
   图片载荷：`{type:'image', openId, imageKey, messageId}`（hub 不做下载转存，由本项目处理）。
-- duty-bot → pm-robot：GET /api/duty/brief（昨日结果+今日名单）；每日播报卡片由 pm-robot 渲染发送（M4 待实施，播报 cron 归 pm-robot）。
+- duty-bot → pm-robot：GET /api/duty/brief（昨日结果+今日名单）。
+  播报分工：**今日值日看板自动播报（12:00）归 duty-bot**，经群自定义机器人 webhook 自播；
+  M4「昨日值日播报」卡片（昨日结果+语录，DDL 风格）仍规划在 pm-robot 渲染发送（待实施）。
 - duty-bot → hub：GET /api/duty/policy（值日域管辖策略，hub 短缓存消费）——管辖群列表
   （`.env` 的 `DUTY_GROUP_CHAT_IDS`）、生效范畴（看板触发词/关键词回答放行/基础指令关闭/引导语）、
   p2p 指令清单。**值日域的权限管辖范畴与生效范畴以本接口为单一事实来源**，hub 断联时以其本仓 env 兜底。

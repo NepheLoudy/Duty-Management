@@ -3,6 +3,7 @@ const config = require('../config');
 const quietHours = require('../utils/quietHours');
 const inquiry = require('../services/inquiryService');
 const compensation = require('../services/compensationService');
+const assistant = require('../services/assistantService');
 
 // ============================================================
 // 定时任务（node-cron 6 段式 + Asia/Shanghai）：
@@ -10,9 +11,10 @@ const compensation = require('../services/compensationService');
 //   2. 当日询问   DUTY_ASK_SCHEDULE          (0 30 18 * * *, D 日 18:30 私信询问，开启监听窗口)
 //   3. 收口       DUTY_DEADLINE_SCHEDULE     (0 0 22 * * *,  D 日 22:00：置未做完/算总状态/生成补偿)
 //   4. 对账       DUTY_RECONCILE_SCHEDULE    (0 30 0 * * *,  每日 00:30 重算总状态/核对补偿义务)
+//   5. 看板播报   DUTY_BOARD_BROADCAST_SCHEDULE (0 0 12 * * *, 每日 12:00 webhook 推今日值日看板)
 //
 // 晚间静默（02:00–09:00，Asia/Shanghai，可配）：
-//   - 次日提醒/当日询问/对账为可重扫任务 → gateTask，窗口内登记积压，
+//   - 次日提醒/当日询问/对账/看板播报为可重扫任务 → gateTask，窗口内登记积压，
 //     冲刷时重跑整个任务函数（以补发时刻最新数据重查）；
 //   - 收口的写表动作不延迟（静默期语义），永远立即执行；只有收口回执通知
 //     属一次性事件通知 → gatePayload 落盘、窗口结束整点按序补发；
@@ -41,11 +43,13 @@ function startCronJobs() {
     duty_prev_remind: () => inquiry.sendPrevDayRemind(),
     duty_ask: () => inquiry.askToday(),
     duty_reconcile: () => compensation.reconcile(),
+    duty_board_broadcast: () => assistant.broadcastTodayBoard(),
   };
 
   tasks.push(scheduleTask(config.schedule.prevRemind, 'duty_prev_remind', '次日值日提醒', quietTaskRunners.duty_prev_remind));
   tasks.push(scheduleTask(config.schedule.ask, 'duty_ask', '当日值日询问', quietTaskRunners.duty_ask));
   tasks.push(scheduleTask(config.schedule.reconcile, 'duty_reconcile', '值日对账', quietTaskRunners.duty_reconcile));
+  tasks.push(scheduleTask(config.schedule.boardBroadcast, 'duty_board_broadcast', '看板自动播报', quietTaskRunners.duty_board_broadcast));
 
   // 收口：写表动作不延迟（不进 gateTask），仅通知载荷过闸门
   const deadlineTask = cron.schedule(config.schedule.deadline, () => {
@@ -89,7 +93,7 @@ async function runClose(options = {}) {
 /** cron 状态（管理接口用） */
 function getCronStatus() {
   return {
-    running: tasks.length === 4,
+    running: tasks.length === 5,
     schedules: config.schedule,
     quietHours: quietHours.getStatus(),
   };

@@ -80,12 +80,20 @@ function isAdminOpenId(openId) {
 }
 
 /**
- * 通讯录同步：全租户部门成员 → members.json（open_id 直取自组织架构，无需逐人绑定）。
- * 已有名册里的 admin 标记按姓名保留；通讯录为空/失败时抛错由调用方兜底（不写坏本地名册）。
+ * 通讯录同步：全租户部门成员 → members.json（open_id 直取组织架构，无需逐人绑定）。
+ * 已有名册里的 admin 标记按姓名保留；同步全程约 17 次飞书调用，瞬时网络抖动自动重试一次；
+ * 通讯录为空/重试仍失败抛错由调用方兜底（不写坏本地名册）。
  * @returns {Array<{name, openId, dept, admin}>}
  */
 async function syncFromContacts() {
-  const users = await contacts.listAllUsers();
+  let users;
+  try {
+    users = await contacts.listAllUsers();
+  } catch (err) {
+    console.warn('[名册] 通讯录同步失败，1.5s 后重试一次:', err.message);
+    await new Promise((r) => setTimeout(r, 1500));
+    users = await contacts.listAllUsers();
+  }
   if (users.length === 0) throw new Error('通讯录返回为空，跳过写回（保留本地名册）');
   let existing = [];
   try {

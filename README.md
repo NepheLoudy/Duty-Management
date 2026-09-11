@@ -1,7 +1,8 @@
 # duty-bot · 值日提醒机器人
 
 实验室/战队值日排班与提醒机器人：一张多维表格 + 队员私信闭环。排班轮转、缺勤补偿、
-私信提醒与收口、照片凭证写表、值日助手（私信说明/群看板）、对外值日数据接口。
+私信提醒与收口、照片凭证写表、值日助手（私信说明/群看板 + 每日看板自动播报）、
+对外值日数据接口。
 
 完整规划见工作区 `duty-bot-plan.md`（含隐私信息，仅本地留存，不入 git）。
 
@@ -19,6 +20,9 @@
   关键词回答放行（@与未@）、基础指令关闭、未命中引导语、p2p 指令清单都随策略下发；
   hub 群内闸门照此执行，本服务失联时 hub 以其本仓 env 短暂兜底；
 - 定时私信提醒/收口为主动发送（Open API，应用身份），不受对话铁律限制；
+- 群看板卡片走**群自定义机器人 webhook**（`DUTY_BOARD_WEBHOOK_URL`，非对话型 im API；
+  未配置时回退应用身份直发）；**每日 12:00 自动播报同一张今日值日看板卡**
+  （`DUTY_BOARD_BROADCAST_SCHEDULE`，过静默闸门，无排班记录自动跳过）；
 - 群内每日播报（昨日结果+今日名单）由 **pm-robot** 经群 webhook 渲染发送（`GET /api/duty/brief` 取数）。
 
 ## 数据模型（多维表格 = 单一事实来源）
@@ -65,6 +69,7 @@
 | D 日 18:30 | 当日询问 | 私信询问，开启监听窗口（是/否/照片） |
 | D 日 22:00 | 收口 | 未回复「是」置未做完（有照片没答「是」同样置未做完并回执提示）；算当日总状态；生成补偿义务。**写表动作不延迟**，仅回执通知过闸门 |
 | 每日 00:30 | 对账 | 重算昨日总状态（兼容手工改表）、核对补偿插入义务、回执管理员 |
+| 每日 12:00 | 看板自动播报 | 今日值日看板卡片经群自定义机器人 webhook 推到值日播报群（无排班记录跳过） |
 
 晚间静默窗口（默认 02:00–09:00）内：提醒/询问/对账登记积压、09:00 整点以最新数据重跑；
 收口回执为一次性通知，落盘按序补发；对话回复与 `/api/bot/test-*` 手动触发不受限。
@@ -74,6 +79,8 @@
 - 私信（精确匹配）：`值日助手`（用法说明）、`查询我的下一次值日`、`我要请假`、
   `绑定 姓名`、`是` / `否`、`生成排班表`（仅管理员）；
 - 群聊（@机器人）：`值日助手` → 今日值日看板卡片，每群 1 小时限流，命中静默。
+  卡片经群自定义机器人 webhook 发送（`DUTY_BOARD_WEBHOOK_URL`，可选
+  `DUTY_BOARD_WEBHOOK_SECRET` 签名），限流/管辖按来源群 chatId 计；未配置时回退应用身份直发。
 
 ## API
 
@@ -82,14 +89,15 @@
 | GET | `/api/health` | 健康检查（含静默窗口状态） |
 | POST | `/api/chat/command` | hub 指令转发：`{command, openId, chatType, chatId?, args?}`；图片 `{type:'image', openId, imageKey, messageId}`；返回 `{reply}`，空串=已自行处理（群看板卡片） |
 | GET | `/api/duty/brief` | 昨日结果+今日名单一次取齐（pm-robot 播报数据源） |
-| POST | `/api/bot/test-remind` / `test-ask` / `test-close` / `test-reconcile` / `test-generate` | 手动触发（body `{"dryRun":true}` 只预览不发送/不落表） |
+| POST | `/api/bot/test-remind` / `test-ask` / `test-close` / `test-reconcile` / `test-generate` / `test-board` | 手动触发（body `{"dryRun":true}` 只预览不发送/不落表） |
 | GET | `/api/bot/cron-status` | 定时任务与静默状态 |
 
 ## 配置
 
 `.env` 真值不进 git（本地 .env 是部署源头，push 时覆盖 NAS），键位清单见 `.env.example`：
-共用应用凭据、表格 token、字段名映射、四个 cron 时刻、生成跨度/间隔、`DUTY_ADMIN_OPEN_IDS`
-（可选覆盖）、看板限流、`DUTY_STATE_FILE`（**生产必须放项目目录之外**，SFTP 部署会清空
+共用应用凭据、表格 token、字段名映射、五个 cron 时刻、生成跨度/间隔、`DUTY_ADMIN_OPEN_IDS`
+（可选覆盖）、看板限流、看板 webhook 通道（`DUTY_BOARD_WEBHOOK_URL/SECRET`）、
+`DUTY_STATE_FILE`（**生产必须放项目目录之外**，SFTP 部署会清空
 `/opt/duty-bot`）、`QUIET_HOURS_*`、NAS 连接。
 
 ### 隐私约定（重要）
@@ -105,6 +113,9 @@
 ```bash
 npm run test:schedule   # 排班引擎单测（纯函数：轮转/插入/配额/复现性）
 npm run test:flow       # 私信闭环干跑（内存表格：询问→是/照片→收口→补偿→请假→对账→指令）
+npm run test:policy     # 管辖策略（policy 下发/管辖判定/看板拒绝与放行）
+npm run test:roster     # 名册同步与定制窗口（通讯录同步/白名单）
+npm run test:board      # 看板 webhook 通道（payload/签名/错误路径/通道选择/限流）
 npm run table:check     # 校验 .env 配置的表格字段是否符合约定
 npm run table:create    # 自动新建 Bitable+排班表（打印 app_token/table_id 供 .env 回填）
 ```
