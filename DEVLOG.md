@@ -58,3 +58,16 @@
 - `scripts/init-duty-table.js`：`该组总状态` 类型断言放宽为文本/单选皆收（`types` 数组），选项校验仅对单选生效——生产表该列为文本，运行时写「今日完成值日」不受影响。
 - 验证：`npm run table:check` 9 字段全过（5 条空壳记录无日期自动忽略）；test:flow / test:policy 回归全过；NAS 实测 `/api/duty/brief` 读表正常、`/api/bot/test-generate` dryRun 正常、health 200。
 - 遗留：名册仅 1 人（已绑定+admin），**排班生成前必须补全 config/members.json 并让队员发「绑定 姓名」**，否则排班会全压到一人。
+
+
+### v6 · 2026-09-11 · d94c48f/9bbea91 · feat
+
+**名册自动读通讯录 + 名册/白名单定制窗口**
+
+- 需求：排班名册不再手工维护——自动读飞书通讯录纳入所有队员（open_id 直取组织架构，绑定流程降级为人工纠错兜底）。
+- `src/feishu/contacts.js`：全租户部门（自根 fetch_child）× 各部门成员拉取，停用成员不入册、多人多部门合并、输出 name/openId/departments。
+- `rosterService.syncFromContacts()`：写回 members.json，**admin 标记按姓名保留**；通讯录为空/失败抛错由调用方兜底（不写坏本地名册）。同步时机：启动 + 生成排班前 + `POST /api/duty/roster/refresh`。
+- 定制窗口：`GET /api/duty/roster`（全景：绑定/白名单/队列标记）、`GET|POST /api/duty/whitelist`（增删即时生效）。
+- 踩坑：`users/find_by_department` 的 page_size 上限 50，写 100 触发 99992402 field validation failed（9bbea91 修复）；本地探测通过 ≠ 参数合法，部署后必须实测同步。
+- 测试：新增 `npm run test:roster`（10 项：同步写回/admin 保留/dept 合并/白名单增删/四个窗口）；flow 测试补 contacts stub；schedule/policy 回归全过。
+- NAS 实测：同步 63 人（12 部门、全部自带 open_id、admin 保留 1）；四窗口 200。

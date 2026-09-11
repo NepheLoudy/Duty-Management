@@ -10,6 +10,10 @@
 - 独立项目（仓库根目录，与 approval-bot 平级），**纯定时任务 + 被动指令服务**，无自己的长连接；
 - 队员私信与群指令：gateway（唯一长连接）→ hub（project-management-robot）→ 本服务
   `POST /api/chat/command`；**不在网关为本项目加消息直连路由**；
+- **名册自动读飞书通讯录**：启动/生成排班前/`POST /api/duty/roster/refresh` 时全员同步
+  （open_id 直取组织架构，无需逐人绑定；「绑定 姓名」降级为人工纠错兜底，admin 标记按姓名保留）；
+  白名单（`config/whitelist.json`）仍为排除名单；定制窗口：`GET /api/duty/roster`、
+  `GET|POST /api/duty/whitelist`（规则见顶层 AGENTS「机器人后端定制窗口」）；
 - **值日域管辖策略（权限管辖范畴/生效范畴）以本项目为单一事实来源**：`.env` 的
   `DUTY_GROUP_CHAT_IDS` 配置管辖群，经 `GET /api/duty/policy` 下发给 hub——看板触发词、
   关键词回答放行（@与未@）、基础指令关闭、未命中引导语、p2p 指令清单都随策略下发；
