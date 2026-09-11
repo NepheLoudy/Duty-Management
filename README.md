@@ -10,6 +10,10 @@
 - 独立项目（仓库根目录，与 approval-bot 平级），**纯定时任务 + 被动指令服务**，无自己的长连接；
 - 队员私信与群指令：gateway（唯一长连接）→ hub（project-management-robot）→ 本服务
   `POST /api/chat/command`；**不在网关为本项目加消息直连路由**；
+- **值日域管辖策略（权限管辖范畴/生效范畴）以本项目为单一事实来源**：`.env` 的
+  `DUTY_GROUP_CHAT_IDS` 配置管辖群，经 `GET /api/duty/policy` 下发给 hub——看板触发词、
+  关键词回答放行（@与未@）、基础指令关闭、未命中引导语、p2p 指令清单都随策略下发；
+  hub 群内闸门照此执行，本服务失联时 hub 以其本仓 env 短暂兜底；
 - 定时私信提醒/收口为主动发送（Open API，应用身份），不受对话铁律限制；
 - 群内每日播报（昨日结果+今日名单）由 **pm-robot** 经群 webhook 渲染发送（`GET /api/duty/brief` 取数）。
 

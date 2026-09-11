@@ -27,6 +27,8 @@ process.env.QUIET_HOURS_DISABLED = '1';
 process.env.DUTY_MEMBERS_FILE = MEMBERS_FILE;
 process.env.DUTY_WHITELIST_FILE = WHITELIST_FILE;
 process.env.DUTY_STATE_FILE = path.join(TMP, 'state.json');
+// 管辖策略不进本测（留空 = 不限制，群看板用例不受真实 .env 管辖列表影响）
+process.env.DUTY_GROUP_CHAT_IDS = '';
 
 // ---- stub 注入（先于服务模块加载） ----
 const memory = { records: [], seq: 1, dmCalls: [], cards: [], fileTokens: [] };

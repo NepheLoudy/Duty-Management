@@ -6,6 +6,7 @@ const state = require('./stateStore');
 const dutyTable = require('./dutyTableService');
 const scheduleService = require('./scheduleService');
 const inquiry = require('./inquiryService');
+const policy = require('./policyService');
 
 // ============================================================
 // 值日助手（经 hub 转发的被动指令层，POST /api/chat/command）
@@ -92,9 +93,16 @@ async function handleCommand(payload = {}) {
 
   if (!raw) return { handled: false, reply: '' };
 
-  // 群聊只认「值日助手」看板（需 @机器人，由 hub 侧保证）
+  // 群聊只认「值日助手」看板（需 @机器人，由 hub 侧保证）；
+  // 管辖校验：策略数据源在本项目（hub 侧同样以 /api/duty/policy 判定，此处防御直调）
   if (chatType === 'group') {
-    if (raw === '值日助手') return handleGroupBoard(payload.chatId);
+    if (!policy.isManagedGroup(payload.chatId)) {
+      console.warn('[指令] 非值日管辖群请求看板，已拒绝:', payload.chatId);
+      return { handled: true, reply: '' };
+    }
+    if (raw === (policy.getPolicy().hubEnforcement.groupBoardCommand || '值日助手')) {
+      return handleGroupBoard(payload.chatId);
+    }
     return { handled: false, reply: '' };
   }
 

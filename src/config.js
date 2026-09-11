@@ -87,6 +87,14 @@ module.exports = {
     rateLimitMs: (parseInt(process.env.DUTY_BOARD_RATE_LIMIT_MINUTES, 10) || 60) * 60 * 1000,
   },
 
+  // 值日域管辖策略（权限管辖范畴/生效范畴的单一事实来源在本项目）：
+  // groupChatIds = 值日专用群（快递申领群等，逗号分隔 chat_id）；
+  // 经 GET /api/duty/policy 下发给 hub 消费，hub 群内闸门以此为准。
+  // 留空 = 不限制（群看板来者不拒，兼容旧部署）
+  jurisdiction: {
+    groupChatIds: parseArrayConfig(process.env.DUTY_GROUP_CHAT_IDS),
+  },
+
   // 运行时状态（监听会话/补偿义务/看板限流时间戳/连续缺勤计数）
   // 生产环境必须配到项目目录之外（SFTP 部署会清空 /opt/duty-bot）
   stateFile: process.env.DUTY_STATE_FILE || path.join(ROOT, '.duty-state.json'),

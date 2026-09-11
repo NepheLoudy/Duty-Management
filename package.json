@@ -11,7 +11,8 @@
     "test:schedule": "node scripts/stub-test-schedule.js",
     "test:flow": "node scripts/stub-test-flow.js",
     "table:check": "node scripts/init-duty-table.js",
-    "table:create": "node scripts/init-duty-table.js --create"
+    "table:create": "node scripts/init-duty-table.js --create",
+    "test:policy": "node scripts/stub-test-policy.js"
   },
   "keywords": [
     "feishu",

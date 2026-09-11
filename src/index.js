@@ -4,6 +4,7 @@ const config = require('./config');
 const roster = require('./services/rosterService');
 const state = require('./services/stateStore');
 const assistant = require('./services/assistantService');
+const policy = require('./services/policyService');
 const scheduleService = require('./services/scheduleService');
 const inquiry = require('./services/inquiryService');
 const compensation = require('./services/compensationService');
@@ -71,6 +72,14 @@ app.post('/api/chat/command', async (req, res) => {
     console.error('处理转发指令失败:', err);
     res.json({ reply: `❌ 指令执行失败：${err.message}` });
   }
+});
+
+// ---------- 管辖策略（hub 值日分支判定依据，短缓存消费） ----------
+// 权限管辖范畴（哪些群）与生效范畴（群里放行什么）的单一事实来源在本项目；
+// hub 据此判定值日管辖群并代为执行放行规则，duty-bot 仍不消费消息事件。
+
+app.get('/api/duty/policy', (req, res) => {
+  res.json(policy.getPolicy());
 });
 
 // ---------- 对外数据接口（pm-robot 每日值日播报数据源） ----------
@@ -144,6 +153,7 @@ function startServer() {
     console.log(`🚀 值日提醒机器人运行在 http://localhost:${config.port}`);
     console.log(`🩺 健康检查: http://localhost:${config.port}/api/health`);
     console.log(`📋 值日简报: http://localhost:${config.port}/api/duty/brief`);
+    console.log(`🧹 管辖策略: http://localhost:${config.port}/api/duty/policy (管辖群 ${config.jurisdiction.groupChatIds.length || '不限'} 个)`);
   });
 
   roster.validateStartup();
