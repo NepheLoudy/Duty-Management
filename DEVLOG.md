@@ -100,7 +100,7 @@
 - 修复：`syncFromContacts` 失败后 1.5s 自动重试一次，重试仍失败才抛错兜底。
 - 配套：运维台代理超时 12s→30s（实测同步 ~6s）、刷新按钮加忙碌态并在成功后自动展示名册全景。
 
-### v9 · 2026-09-12 · 随本提交落地 · fix
+### v9 · 2026-09-12 · `f2220af` · fix
 
 **值日链路全量修复：每日播报静默跳过改回退直发 + 回填群 webhook + 打卡口语变体 + 文案口径（配 hub v74 群门斜杠修复）**
 
@@ -110,3 +110,10 @@
 - 打卡确认口语变体：p2pCommands 增补「是的/好/好了/完成/完成了/做完了/搞定/搞定了」，新增 `inquiryService.confirmVariant`——有当日活跃询问会话等同「是」，无会话返回 `handled:false`+空 reply（hub 落回常规流程，闲聊不接管、不发未识别提示）。
 - 文案口径：看板 footer 明示「完成后请**私信**回复『是』」（原文案诱导群内回复，群里的「是」只会得到引导语——「关键词和@指令撞了」观感的直接来源之一）；18:30 询问与 HELP 注明「若同时收到 DDL 逾期确认，『是』会先被其占用，打卡未成功请再发一次」。
 - 测试：test:policy 断言更新为 20 词清单；test:board 播报段改断言回退语义（未配置/推送失败 → `via:'app'` 直发管辖群）并补 webhook 故障注入；flow/policy/board 补 `DUTY_BOARD_WEBHOOK_URL=''` 环境隔离（测试不再依赖本地 .env 缺键）；五套件全过。
+
+### v10 · 2026-09-12 · 随本提交落地 · docs
+
+**.env.example 补 QUIET_BACKLOG_FILE + v9 锚点回填**
+
+- `.env.example` 静默段补 `QUIET_BACKLOG_FILE=/home/qianli/duty-bot-data/quiet-backlog.json`：v9 代码已支持该变量、`.env` 已实际配置，模板欠账补齐（qianli-deploy「新增配置同步改 .env.example」约定；同批 bambu/ticket-bot 静默积压挪址收尾联动）。
+- v9 条目锚点回填 `f2220af`（原记「随本提交落地」）。
