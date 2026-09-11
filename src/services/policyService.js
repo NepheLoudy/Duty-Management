@@ -20,16 +20,18 @@ function getPolicy() {
 
     // 生效范畴：hub 在管辖群代为执行的放行规则
     hubEnforcement: {
-      groupBoardCommand: '值日助手',   // 群内看板触发词（@后精确匹配，容忍 / 前缀）
+      groupBoardCommand: '值日助手',   // 群内看板触发词（hub 群门按 裸词/带/ 双形态匹配；本仓 p2p 侧去前缀双保险）
       closeBasicCommands: true,        // hub 基础指令（/help、/print-* 等）在管辖群关闭
       keywordPassthrough: true,        // hub 关键词自动回答在管辖群放行（@与未@）
       fallbackGuidance: GROUP_GUIDANCE,
     },
 
     // p2p 直传指令白名单（hub 值日分支放行依据，绕过 hub 私聊指令白名单）；
-    // / 前缀变体与裸词等效（duty-bot 侧统一去前缀）
+    // / 前缀变体与裸词等效（duty-bot 侧统一去前缀）；
+    // 打卡确认口语变体：hub 放行后由 duty-bot 判定——有当日活跃询问会话才生效
     p2pCommands: [
       '值日助手', '我要请假', '查询我的下一次值日', '是', '否', '生成排班表',
+      '是的', '好', '好了', '完成', '完成了', '做完了', '搞定', '搞定了',
       '/值日助手', '/我要请假', '/查询我的下一次值日', '/是', '/否', '/生成排班表',
     ],
     p2pCommandPrefixes: ['绑定', '/绑定'],

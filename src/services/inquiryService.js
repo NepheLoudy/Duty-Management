@@ -86,8 +86,9 @@ async function askToday(options = {}) {
       `🧹 今天（${date}）值日完成了吗？你的岗位是【${rec.position}】`,
       `职责：${positionDutyText(rec.position)}`,
       '',
-      '完成后请回复「是」，并上传现场照片（照片会写入值日表对应岗位栏）。',
+      '完成后请回复「是」（口语如「是的」「完成了」也可以），并上传现场照片（照片会写入值日表对应岗位栏）。',
       '22:00 统一收口，未回复「是」会记为「未做完」；想请假回复「我要请假」。',
+      '提示：若你同时收到项目管理 DDL 逾期确认，回复的「是」会先被它占用；打卡未成功请再发一次「是」。',
     ].join('\n');
     if (dryRun) {
       asked.push({ name: member.name, position: rec.position, preview: text });
@@ -158,6 +159,14 @@ async function handleNo(openId) {
     handled: true,
     reply: '收到。22:00 收口前你仍可以：补传现场照片 + 回复「是」完成打卡；或回复「我要请假」登记请假。',
   };
+}
+
+/** 打卡确认口语变体（是的/好/完成了…）：有当日活跃询问会话才等同「是」；
+ *  无会话返回 handled:false + 空回复，hub 侧落回常规流程（欢迎语），不发未识别提示 */
+async function confirmVariant(openId) {
+  const { session } = await sessionRecord(openId);
+  if (!session) return { handled: false, reply: '' };
+  return handleYes(openId);
 }
 
 /**
@@ -316,6 +325,7 @@ module.exports = {
   askToday,
   handleYes,
   handleNo,
+  confirmVariant,
   handleImage,
   closeToday,
   requestLeave,

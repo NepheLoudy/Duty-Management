@@ -18,6 +18,7 @@ fs.writeFileSync(process.env.DUTY_MEMBERS_FILE, JSON.stringify({ members: [{ nam
 fs.writeFileSync(process.env.DUTY_WHITELIST_FILE, JSON.stringify({ names: [] }));
 // 管辖范畴：两个值日专用群
 process.env.DUTY_GROUP_CHAT_IDS = 'oc_managed_a,oc_managed_b';
+process.env.DUTY_BOARD_WEBHOOK_URL = '';
 
 // ---- stub 注入（先于服务模块加载）：表格返回空记录、捕获发出的卡片 ----
 const cardsSent = [];
@@ -62,8 +63,10 @@ function check(desc, cond, detail = '') {
     && p.hubEnforcement.closeBasicCommands === true
     && p.hubEnforcement.keywordPassthrough === true
     && typeof p.hubEnforcement.fallbackGuidance === 'string' && p.hubEnforcement.fallbackGuidance.includes('值日助手'));
-  check('策略：p2p 指令清单 6 词×2（裸词+/别名）+ 绑定前缀',
-    p.p2pCommands.length === 12 && JSON.stringify(p.p2pCommandPrefixes) === JSON.stringify(['绑定', '/绑定']),
+  check('策略：p2p 指令清单 6 核心词+8 打卡口语变体（裸词）+6 斜杠别名 + 绑定前缀',
+    p.p2pCommands.length === 20
+    && ['是的', '好', '好了', '完成', '完成了', '做完了', '搞定', '搞定了'].every((w) => p.p2pCommands.includes(w))
+    && JSON.stringify(p.p2pCommandPrefixes) === JSON.stringify(['绑定', '/绑定']),
     JSON.stringify(p.p2pCommands));
 
   // ③ 管辖判定

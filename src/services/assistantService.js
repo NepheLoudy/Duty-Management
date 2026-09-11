@@ -12,7 +12,8 @@ const policy = require('./policyService');
 // ============================================================
 // 值日助手（经 hub 转发的被动指令层，POST /api/chat/command）
 // - 私信（精确匹配）：值日助手 / 我要请假 / 查询我的下一次值日 / 绑定 X /
-//   是 / 否 / 生成排班表（仅名册 admin）
+//   是 / 否 / 生成排班表（仅名册 admin）；打卡确认口语变体（是的/完成了 等）
+//   在有当日活跃询问会话时等同「是」，无会话静默交还 hub 走常规流程
 // - 群聊（@机器人 值日助手）：今日值日状态看板卡片，每群 1 小时限流一次，
 //   命中限流静默；发送通道为群自定义机器人 webhook（非对话型），
 //   未配置 DUTY_BOARD_WEBHOOK_URL 时回退应用身份 im API 直发
@@ -26,10 +27,11 @@ const HELP_TEXT = [
   '· 「查询我的下一次值日」—— 下次值日日期与岗位',
   '· 「我要请假」—— 登记请假（当次置已请假，下周自动补插一次值日）',
   '· 「绑定 姓名」—— 首次使用绑定账号（提醒与确认走私信）',
-  '· 「是」/「否」—— 值日日 18:30 询问后的完成确认（照片可直接发我，22:00 收口）',
+  '· 「是」/「否」—— 值日日 18:30 询问后的完成确认（口语如「是的」「完成了」也可；照片可直接发我，22:00 收口）',
   '· 「生成排班表」—— 管理员专用，按日历向下生成一个月排班',
   '',
   '规则：完成后回复「是」并上传现场照片（照片写入值日表对应岗位栏）；22:00 收口，未回复「是」记为未做完。',
+  '若你同时收到项目管理 DDL 逾期确认，回复的「是」会先被它占用——打卡未成功请再发一次「是」。',
 ].join('\n');
 
 /** 今日值日状态看板卡片 */
@@ -58,7 +60,7 @@ function buildBoardCard(dateStr, records) {
       { tag: 'hr' },
       { tag: 'markdown', content: lines.join('\n') },
       { tag: 'hr' },
-      { tag: 'markdown', content: '> 私信值日对话机器人「值日助手」可查询排班、请假；完成后回复「是」并上传照片，22:00 收口。' },
+      { tag: 'markdown', content: '> 排班查询 / 请假 / 打卡确认均在私信办理：私信机器人「值日助手」可查询排班、请假；完成后请私信回复「是」并上传照片，22:00 收口。' },
     ],
   };
 }
@@ -94,14 +96,11 @@ async function handleGroupBoard(chatId) {
 
 /**
  * 每日自动播报（cron 12:00，POST /api/bot/test-board 手动触发共用）：
- * 今日值日看板卡片经群自定义机器人 webhook 推到值日播报群。
- * 无排班记录/未配置 webhook 时跳过；dryRun 只回预览不发送。
+ * 今日值日看板卡片推到值日播报群——主通道群自定义机器人 webhook（非对话型），
+ * 未配置 webhook 时回退应用身份 im API 直发管辖群（与群看板回退同款，不再静默跳过）。
+ * 无排班记录时跳过；dryRun 只回预览不发送。
  */
 async function broadcastTodayBoard({ dryRun = false } = {}) {
-  if (!config.board.webhookUrl) {
-    console.warn('[看板播报] 未配置 DUTY_BOARD_WEBHOOK_URL，自动播报跳过');
-    return { skipped: true, reason: 'webhook_not_configured' };
-  }
   const records = await dutyTable.getRecordsByDate(todayStr());
   if (!records.length) {
     console.log('[看板播报] 今日无排班记录，跳过');
@@ -116,9 +115,25 @@ async function broadcastTodayBoard({ dryRun = false } = {}) {
       members: records.map((r) => ({ name: r.name, position: r.position, status: r.status || '待定' })),
     };
   }
-  await webhook.sendCardToWebhook(config.board.webhookUrl, config.board.webhookSecret, card);
-  console.log(`[看板播报] 今日值日看板已推送（${records.length} 条记录）`);
-  return { skipped: false, via: 'webhook', date: todayStr() };
+  if (config.board.webhookUrl) {
+    try {
+      await webhook.sendCardToWebhook(config.board.webhookUrl, config.board.webhookSecret, card);
+      console.log(`[看板播报] 今日值日看板已推送（${records.length} 条记录）`);
+      return { skipped: false, via: 'webhook', date: todayStr() };
+    } catch (err) {
+      console.error('[看板播报] webhook 推送失败，回退应用身份直发管辖群:', err.message);
+    }
+  }
+  const targets = policy.getPolicy().groupChatIds;
+  if (!targets.length) {
+    console.warn('[看板播报] 未配置 DUTY_BOARD_WEBHOOK_URL 且无管辖群可直发，自动播报跳过');
+    return { skipped: true, reason: 'webhook_not_configured_and_no_group', date: todayStr() };
+  }
+  for (const chatId of targets) {
+    await bot.sendCardToChat(chatId, card);
+  }
+  console.log(`[看板播报] 未配置 webhook，已按应用身份直发 ${targets.length} 个管辖群（${records.length} 条记录）`);
+  return { skipped: false, via: 'app', groups: targets.length, date: todayStr() };
 }
 
 /**
@@ -160,6 +175,18 @@ async function handleCommand(payload = {}) {
       }
       return raw === '是' ? inquiry.handleYes(openId) : inquiry.handleNo(openId);
     }
+
+    // 打卡确认口语变体：仅当日有活跃询问会话时等同「是」；
+    // 无会话静默交还 hub（reply 留空），避免闲聊「好/完成」被值日助手接管
+    case '是的':
+    case '好':
+    case '好了':
+    case '完成':
+    case '完成了':
+    case '做完了':
+    case '搞定':
+    case '搞定了':
+      return inquiry.confirmVariant(openId);
 
     case '我要请假': {
       if (!member) {

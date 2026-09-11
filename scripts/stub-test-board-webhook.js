@@ -2,7 +2,7 @@
  * 看板 webhook 通道 stub 测试（stub：临时状态文件 + 本地 http 服务/mock 发送层）
  * 覆盖：webhook 发送层（payload 形状、签名、错误路径、旧版 StatusCode）、
  *      handleGroupBoard 通道选择（配置 webhook 走 webhook / 未配置回退 im API）、
- *      限流与卡片复用不受通道切换影响。
+ *      限流与卡片复用不受通道切换影响、自动播报通道回退（未配置/推送失败 → 应用身份直发）。
  * 运行：npm run test:board
  */
 const os = require('os');
@@ -94,10 +94,12 @@ const server = http.createServer((req, res) => {
 
   // ---- 注入捕获层，再加载 assistantService（必须在首次 require 前替换缓存） ----
   const webhookCalls = [];
+  let webhookFailMode = false;
   require.cache[require.resolve('../src/feishu/webhook')] = {
     id: 'webhook-stub', filename: 'webhook-stub', loaded: true,
     exports: {
       async sendCardToWebhook(url, secret, cardContent) {
+        if (webhookFailMode) throw new Error('webhook 发送失败（模拟）');
         webhookCalls.push({ url, secret, title: cardContent.header.title.content });
         return {};
       },
@@ -165,10 +167,26 @@ const server = http.createServer((req, res) => {
   const empty = await assistant.broadcastTodayBoard({});
   check('自动播报：今日无排班记录自动跳过',
     empty.skipped === true && empty.reason === 'no_records' && webhookCalls.length === 2);
+
+  // ⑧ 播报通道回退：未配置 webhook 或推送失败 → 应用身份直发管辖群（不再静默跳过）
   config.board.webhookUrl = '';
+  stubRecords = ['总负责', '工位区', '装配区'].map((pos) => ({
+    position: pos, name: '队员A', status: '已做完',
+    receiptCounts: { '总负责': 1, '工位区': 0, '装配区': 0 },
+  }));
   const nocfg = await assistant.broadcastTodayBoard({});
-  check('自动播报：未配置 webhook 自动跳过',
-    nocfg.skipped === true && nocfg.reason === 'webhook_not_configured' && webhookCalls.length === 2);
+  check('自动播报：未配置 webhook → 回退应用身份直发管辖群',
+    nocfg.skipped === false && nocfg.via === 'app' && nocfg.groups === 1
+    && chatCards.includes('oc_managed_a') && webhookCalls.length === 2,
+    JSON.stringify({ nocfg, chatCards }));
+
+  webhookFailMode = true;
+  const whFail = await assistant.broadcastTodayBoard({});
+  webhookFailMode = false;
+  check('自动播报：webhook 推送失败 → 同样回退应用身份直发（播报不因通道故障中断）',
+    whFail.skipped === false && whFail.via === 'app'
+    && chatCards.filter((c) => c === 'oc_managed_a').length === 2,
+    JSON.stringify({ whFail, chatCards }));
 
   server.close();
   console.log(failed === 0 ? `\n全部通过 ✅（临时目录 ${TMP}）` : `\n${failed} 项失败 ❌`);

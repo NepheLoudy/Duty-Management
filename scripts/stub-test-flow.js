@@ -29,6 +29,8 @@ process.env.DUTY_WHITELIST_FILE = WHITELIST_FILE;
 process.env.DUTY_STATE_FILE = path.join(TMP, 'state.json');
 // 管辖策略不进本测（留空 = 不限制，群看板用例不受真实 .env 管辖列表影响）
 process.env.DUTY_GROUP_CHAT_IDS = '';
+// 看板通道不进本测（留空 = 回退应用身份，群看板用例不受真实 .env webhook 影响）
+process.env.DUTY_BOARD_WEBHOOK_URL = '';
 
 // ---- stub 注入（先于服务模块加载） ----
 // 通讯录 stub：名册同步回显当前名册文件（openId 原样保留，未绑定仍为空，测试语义不变）
