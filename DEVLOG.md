@@ -151,7 +151,7 @@
 - DEVLOG 哈希回填：v10（45fb917）/ v11（ad2e794）/ v12（3f86bcb）/ v13（1d522cf）。
 - 回归：schedule/policy/flow/board/roster 五套 stub 全过（schedule 套件含插入语义断言）。
 
-### v15 · 2026-09-13 · 随本提交落地 · feat
+### v15 · 2026-09-13 · e5d9c5c · feat
 
 **M4 落地：值日看板卡「昨日战报」+ 请假当日抽调补位（用户口径拍板）**
 
@@ -160,3 +160,20 @@
 - 测试：stub-test-flow 新增 3 条补位断言（同岗插记录/回执说明/私信反查验证当日同岗）+ 旧「目标周空位」断言改为**对账前 planInsertion 快照**（修真实日期敏感误报：安置本身会占掉空位日）；stub-test-board-webhook 新增 2 条卡片内容断言（有/无昨日数据）；schedule/flow/policy/board/roster 五套全过。
 - README：缺勤补偿节改写（补位语义）、12:00 播报口径、M4 落地说明、里程碑 M4 销项、pm-robot 预留键注记更新。
 - DEVLOG 哈希回填：v14（5854556）。
+
+### v16 · 2026-09-13 · 随本提交落地 · feat
+
+**值日打卡主词改「打卡」+ 询问窗口 DDL 冲突提示（用户拍板，配 hub v81）**
+
+- **打卡主词**：assistantService 新增「打卡/打卡了」路由（效果等同「是」，需先绑定），policy `p2pCommands` 与 hub 失联兜底清单同步加词（含斜杠变体）；「是/是的/好了/完成了/做完了/搞定」兼容保留。全量文案「回复是」→「回复打卡」：HELP、D-1 提醒、18:30 询问、看板 footer、「否」补救提示、照片先到提示、22:00 收口 photoOnly 回执、请假补位通知。
+- **询问窗口冲突提示**：新增 `ddlConflictClient`（GET hub `/api/ddl/pending`，60s 缓存 + 2s 超时 + 失联静默降级）——成员有未过期 DDL 逾期确认时，18:30 询问追加「⚠️ 回复『是』会确认那个项目（12 小时内有效），不会完成值日打卡——值日请回复『打卡』」。
+- 测试：flow 新增 4 断言（无冲突不加提示/有冲突仅冲突成员加提示/打卡主词打卡成功/「是」兼容路由）；policy 套件 p2pCommands 清单断言 20→24 词；schedule/flow/policy/board/roster 五套全过。
+- `.env.example`：`HUB_SERVICE_URL`（默认 http://localhost:3000）。
+
+### v16 · 2026-09-13 · 随本提交落地 · chore
+
+**建表脚本移除「网关功能使用/网关队员活跃」两表定义（随 gateway v18 下线联动）**
+
+- create-plaza-tables.js 只保留 动态广场 + 网关日活跃（口径=机器人交互）：用户拍板监听只留机器人交互强相关后，gateway 不再写两张明细表（gateway v18），防多维表格删表后被旧脚本重建。
+- 本地提交暂缓部署：仓内另有在途改动（assistantService/inquiryService/policyService/ddlConflictClient），不宜 git add -A 全量 push；本脚本随下次 duty-bot push 自然带上 NAS，在那之前勿在 NAS 跑旧版建表脚本。
+- DEVLOG 哈希回填：v15（e5d9c5c）。

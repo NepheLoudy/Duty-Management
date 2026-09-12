@@ -1,9 +1,9 @@
 /**
  * 动态广场看板建表脚本（一次性、幂等）：在「机器人项目看板」多维表格里创建
  *   1. 动态广场      —— 各机器人事件流（标题/来源机器人/事件类型/数量/链接/动态时间）
- *   2. 网关日活跃    —— gateway usage 日汇总（日期/总消息数/活跃人数/功能数）
- *   3. 网关功能使用  —— 日期 × 功能 × 次数（长表，供 TopN 条形图）
- *   4. 网关队员活跃  —— 日期 × 成员 × 消息数
+ *   2. 网关日活跃    —— gateway usage 日汇总（日期/总消息数/活跃人数/功能数；
+ *                      口径=机器人交互。「网关功能使用/网关队员活跃」两表已下线，
+ *                      2026-09-13 用户拍板只留日活跃单表）
  * 已存在的表/字段跳过；结束时打印各表 table_id（供各仓 .env 配置）。
  * 运行：node scripts/create-plaza-tables.js
  */
@@ -36,15 +36,6 @@ const TABLES = [
     { field_name: '总消息数', type: 2, property: { formatter: '0' } },
     { field_name: '活跃人数', type: 2, property: { formatter: '0' } },
     { field_name: '功能数', type: 2, property: { formatter: '0' } },
-  ] },
-  { name: '网关功能使用', primaryName: '日期', fields: [
-    { field_name: '功能', type: 1 },
-    { field_name: '次数', type: 2, property: { formatter: '0' } },
-  ] },
-  { name: '网关队员活跃', primaryName: '日期', fields: [
-    { field_name: '成员', type: 1 },
-    { field_name: 'open_id', type: 1 },
-    { field_name: '消息数', type: 2, property: { formatter: '0' } },
   ] },
 ];
 
