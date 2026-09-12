@@ -86,6 +86,13 @@ require.cache[require.resolve('../src/feishu/client')] = {
   },
 };
 
+// DDL 冲突客户端桩：conflictIds 可控（18:30 询问冲突提示用，2026-09-13 口径）
+let conflictIds = [];
+require.cache[require.resolve('../src/services/ddlConflictClient')] = {
+  id: 'ddl-conflict-stub', filename: 'ddl-conflict-stub', loaded: true,
+  exports: { async hasPendingDdlConfirm(openId) { return conflictIds.includes(openId); } },
+};
+
 // ---- 被测模块 ----
 const config = require('../src/config');
 const { todayStr, addDays, mondayOf } = require('../src/utils/dates');
@@ -126,10 +133,23 @@ function check(desc, cond, detail = '') {
   const ask = await inquiry.askToday();
   check('当日询问：私信 3 人', memory.dmCalls.filter((c) => c.text.includes('值日完成了吗')).length === 3);
   check('当日询问：会话建立 3 个', Object.keys(state.load().sessions).length === 3);
+  check('当日询问：无 DDL 冲突 → 不加冲突提示', !memory.dmCalls.some((c) => c.text.includes('DDL 逾期确认待回复')));
 
-  // ---- 3. 是/否/照片写回 ----
-  const yes = await inquiry.handleYes('ou_test_a');
-  check('队员A 回「是」→ 已做完', yes.handled && yes.reply.includes('已记录'));
+  // 有未过期 DDL 确认的成员（队员A）：重新询问应带冲突提示，且主词为「打卡」
+  conflictIds = ['ou_test_a'];
+  await inquiry.askToday();
+  const askA = memory.dmCalls.filter((c) => c.openId === 'ou_test_a' && c.text.includes('值日完成了吗')).pop();
+  check('当日询问：有 DDL 冲突 → 询问带额外提示（仅冲突成员）',
+    askA && askA.text.includes('DDL 逾期确认待回复') && askA.text.includes('值日请回复「打卡」')
+    && memory.dmCalls.filter((c) => c.text.includes('DDL 逾期确认待回复')).length === 1,
+    askA && askA.text);
+  conflictIds = [];
+
+  // ---- 3. 是/否/打卡/照片写回 ----
+  const checkin = await assistant.handleCommand({ command: '打卡', openId: 'ou_test_a', chatType: 'p2p' });
+  check('队员A 回「打卡」→ 已做完（主词，效果等同「是」）', checkin.handled && checkin.reply.includes('已记录'), checkin.reply);
+  const yesCompat = await assistant.handleCommand({ command: '是', openId: 'ou_test_a', chatType: 'p2p' });
+  check('队员A 再回「是」→ 兼容保留（仍被值日分支接管）', yesCompat.handled === true, JSON.stringify(yesCompat));
   const imgB = await inquiry.handleImage({ openId: 'ou_test_b', imageKey: 'img_key_1', messageId: 'om_1' });
   check('队员B 传照片 → 回执第 1 张', imgB.handled && imgB.reply.includes('第 1 张'), imgB.reply);
   const noC = await inquiry.handleNo('ou_test_c');
@@ -138,7 +158,7 @@ function check(desc, cond, detail = '') {
   const recs = await dutyTable.getRecordsByDate(today);
   const recA = recs.find((r) => r.name === '队员A');
   const recB = recs.find((r) => r.name === '队员B');
-  check('队员A 状态=已做完', recA.status === '已做完', recA.status);
+  check('队员A 状态=已做完（打卡）', recA.status === '已做完', recA.status);
   check('队员B 照片已挂「凭证-工位」', recB.receiptCounts['工位区'] === 1, JSON.stringify(recB.receiptCounts));
   check('队员B 状态仍为空（照片≠已完成）', !recB.status);
 

@@ -63,8 +63,9 @@ function check(desc, cond, detail = '') {
     && p.hubEnforcement.closeBasicCommands === true
     && p.hubEnforcement.keywordPassthrough === true
     && typeof p.hubEnforcement.fallbackGuidance === 'string' && p.hubEnforcement.fallbackGuidance.includes('值日助手'));
-  check('策略：p2p 指令清单 6 核心词+8 打卡口语变体（裸词）+6 斜杠别名 + 绑定前缀',
-    p.p2pCommands.length === 20
+  check('策略：p2p 指令清单 8 核心词（含打卡/打卡了）+8 打卡口语变体（裸词）+8 斜杠别名 + 绑定前缀',
+    p.p2pCommands.length === 24
+    && ['打卡', '打卡了', '/打卡', '/打卡了'].every((w) => p.p2pCommands.includes(w))
     && ['是的', '好', '好了', '完成', '完成了', '做完了', '搞定', '搞定了'].every((w) => p.p2pCommands.includes(w))
     && JSON.stringify(p.p2pCommandPrefixes) === JSON.stringify(['绑定', '/绑定']),
     JSON.stringify(p.p2pCommands));

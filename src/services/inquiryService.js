@@ -7,6 +7,7 @@ const roster = require('./rosterService');
 const state = require('./stateStore');
 const compensation = require('./compensationService');
 const scheduleService = require('./scheduleService');
+const ddlConflict = require('./ddlConflictClient');
 const plaza = require('./plaza');
 
 // ============================================================
@@ -53,7 +54,7 @@ async function sendPrevDayRemind(options = {}) {
       '',
       '· 想请假：回复「我要请假」',
       '· 想查询排班：回复「值日助手」',
-      '· 明天 18:30 会私信问你完成情况，完成后回复「是」并上传现场照片（照片会写入值日表）',
+      '· 明天 18:30 会私信问你完成情况，完成后回复「打卡」并上传现场照片（照片会写入值日表）',
     ].join('\n');
     if (dryRun) {
       sent.push({ name: member.name, position: rec.position, preview: text });
@@ -84,14 +85,19 @@ async function askToday(options = {}) {
       skipped.push({ name: rec.name || '（未绑定）', reason: '未绑定账号' });
       continue;
     }
-    const text = [
+    const lines = [
       `🧹 今天（${date}）值日完成了吗？你的岗位是【${rec.position}】`,
       `职责：${positionDutyText(rec.position)}`,
       '',
-      '完成后请回复「是」（口语如「是的」「完成了」也可以），并上传现场照片（照片会写入值日表对应岗位栏）。',
-      '22:00 统一收口，未回复「是」会记为「未做完」；想请假回复「我要请假」。',
-      '提示：若你同时收到项目管理 DDL 逾期确认，回复的「是」会先被它占用；打卡未成功请再发一次「是」。',
-    ].join('\n');
+      '完成后请回复「打卡」完成值日打卡，并上传现场照片（照片会写入值日表对应岗位栏）。',
+      '22:00 统一收口，未打卡会记为「未做完」；想请假回复「我要请假」。',
+    ];
+    // 有未过期的 DDL 逾期确认时加冲突提示（2026-09-13 口径：值日打卡用「打卡」，
+    // 回复「是」会确认 DDL 项目而非打卡；hub 查不到时静默降级不加提示）
+    if (await ddlConflict.hasPendingDdlConfirm(member.openId)) {
+      lines.push('⚠️ 你有一条 DDL 逾期确认待回复：回复「是」会确认那个项目（12 小时内有效），不会完成值日打卡——值日请回复「打卡」。');
+    }
+    const text = lines.join('\n');
     if (dryRun) {
       asked.push({ name: member.name, position: rec.position, preview: text });
     } else {
@@ -160,7 +166,7 @@ async function handleNo(openId) {
   }
   return {
     handled: true,
-    reply: '收到。22:00 收口前你仍可以：补传现场照片 + 回复「是」完成打卡；或回复「我要请假」登记请假。',
+    reply: '收到。22:00 收口前你仍可以：补传现场照片 + 回复「打卡」完成打卡；或回复「我要请假」登记请假。',
   };
 }
 
@@ -193,7 +199,7 @@ async function handleImage({ openId, imageKey, messageId }) {
   return {
     handled: true,
     reply: `📸 已收到第 ${count} 张照片，写入「${session.position}」凭证栏。`
-      + (doneMarked ? '今日值日已完成，辛苦了！' : '完成后记得回复「是」，22:00 前有效。'),
+      + (doneMarked ? '今日值日已完成，辛苦了！' : '完成后记得回复「打卡」，22:00 前有效。'),
   };
 }
 
@@ -307,7 +313,7 @@ async function requestLeave(member) {
       await bot.sendTextToUser(
         replacement.openId,
         `🧹 补位通知：${rec.dateStr}（${rec.position}）的值日因 ${member.name} 请假，已安排你补位。\n`
-        + '完成后请照常私信回复「是」并上传照片，22:00 前完成即可。谢谢你！',
+        + '完成后请照常私信回复「打卡」并上传照片，22:00 前完成即可。谢谢你！',
       );
     } catch (err) {
       console.error(`[补位] 通知 ${replacement.name} 失败:`, err.message);
@@ -334,7 +340,7 @@ async function sendCloseNotifications(notifications) {
     try {
       await bot.sendTextToUser(
         item.openId,
-        '🧹 今天的值日已按「未做完」收口：你上传了照片但没有回复「是」。下次记得照片 + 回复「是」才算完成哦。'
+        '🧹 今天的值日已按「未做完」收口：你上传了照片但没有回复「打卡」。下次记得照片 + 回复「打卡」才算完成哦。'
       );
     } catch (err) {
       console.error(`[收口] 照片未答是回执发送失败（${item.name}）:`, err.message);
