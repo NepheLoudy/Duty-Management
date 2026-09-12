@@ -23,7 +23,6 @@ function getPolicy() {
     hubEnforcement: {
       groupBoardCommand: '值日助手',   // 群内看板触发词（hub 群门按 裸词/带/ 双形态匹配；本仓 p2p 侧去前缀双保险）
       closeBasicCommands: true,        // hub 基础指令（/help、/print-* 等）在管辖群关闭
-      keywordPassthrough: true,        // hub 关键词自动回答在管辖群放行（@与未@）
       fallbackGuidance: GROUP_GUIDANCE,
     },
 

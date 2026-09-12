@@ -61,7 +61,6 @@ function check(desc, cond, detail = '') {
   check('策略：生效范畴齐备（看板触发词/指令关闭/关键词放行/引导语）',
     p.hubEnforcement.groupBoardCommand === '值日助手'
     && p.hubEnforcement.closeBasicCommands === true
-    && p.hubEnforcement.keywordPassthrough === true
     && typeof p.hubEnforcement.fallbackGuidance === 'string' && p.hubEnforcement.fallbackGuidance.includes('值日助手'));
   check('策略：p2p 指令清单 8 核心词（含打卡/打卡了）+8 打卡口语变体（裸词）+8 斜杠别名 + 绑定前缀',
     p.p2pCommands.length === 24

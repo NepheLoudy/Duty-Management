@@ -183,3 +183,9 @@
 - create-plaza-tables.js 只保留 动态广场 + 网关日活跃（口径=机器人交互）：用户拍板监听只留机器人交互强相关后，gateway 不再写两张明细表（gateway v18），防多维表格删表后被旧脚本重建。
 - 本地提交暂缓部署：仓内另有在途改动（assistantService/inquiryService/policyService/ddlConflictClient），不宜 git add -A 全量 push；本脚本随下次 duty-bot push 自然带上 NAS，在那之前勿在 NAS 跑旧版建表脚本。
 - DEVLOG 哈希回填：v15（e5d9c5c）。
+
+### v18 · 2026-09-13 · 随本提交落地 · refactor
+
+**值日策略移除 keywordPassthrough 生效范畴（配 hub v82，用户拍板：未@关键词回答全群统一）**
+
+- hub 关键词回答全群统一后，管辖策略的 `hubEnforcement.keywordPassthrough` 成为死配置：policyService 删除该字段，stub-test-policy 同步去断言。管辖策略继续下发看板触发词/基础指令关闭/引导语/p2p 指令清单。
