@@ -23,6 +23,7 @@ fs.writeFileSync(MEMBERS_FILE, JSON.stringify({
 }, null, 2));
 fs.writeFileSync(WHITELIST_FILE, JSON.stringify({ names: ['队员E'] }));
 
+process.env.PLAZA_BITABLE_TABLE_ID = ''; // 测试禁用动态广场写表（防污染生产表）
 process.env.QUIET_HOURS_DISABLED = '1';
 process.env.DUTY_MEMBERS_FILE = MEMBERS_FILE;
 process.env.DUTY_WHITELIST_FILE = WHITELIST_FILE;

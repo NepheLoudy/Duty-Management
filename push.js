@@ -32,8 +32,25 @@ const GIT_REMOTE = 'https://github.com/NepheLoudy/Duty-Management.git';
 const PM2_NAME = 'duty-bot';
 
 // 真实名册/白名单在 .gitignore 里（含成员姓名与 open_id，绝不进 git），
-// 但 NAS 运行必须有：走 git 路径部署时仓库里没有这两个文件，这里显式 SFTP 补齐
+// 但 NAS 运行必须有：走 git 路径部署时仓库里没有这两个文件，这里显式 SFTP 补齐。
+// 【运行时数据保护】这两份文件的权威编辑路径在 NAS 侧（运维台/定制窗口），本地只是种子：
+// 上传前先备份 NAS 现网版本；本地条目数少于现网时跳过上传（PUSH_FORCE_PRIVATE=1 强制覆盖）。
+// 事故记录：2026-09-12 v9 推送曾用本地空 whitelist.json 覆盖 NAS 18 人排除名单（不可恢复）。
 const PRIVATE_CONFIG_FILES = ['config/members.json', 'config/whitelist.json'];
+const DATA_DIR = '/home/qianli/duty-bot-data';
+
+/** 估算配置里的条目数（数组字段长度求和；解析失败按内容字节数/100 估） */
+function countEntries(content) {
+  if (!content || !content.trim()) return 0;
+  try {
+    const obj = JSON.parse(content);
+    const arrays = Object.values(obj).filter((v) => Array.isArray(v));
+    if (arrays.length) return arrays.reduce((sum, a) => sum + a.length, 0);
+    return Object.keys(obj).length;
+  } catch {
+    return Math.floor(content.length / 100);
+  }
+}
 
 const nasConfig = {
   host: process.env.NAS_HOST,
@@ -193,14 +210,41 @@ function uploadEnv() {
       conn.end();
       process.exit(1);
     }
-    const localFiles = ['.env', ...PRIVATE_CONFIG_FILES].filter((f) => fs.existsSync(path.join(__dirname, f)));
+    const envFile = '.env';
+    const privateFiles = PRIVATE_CONFIG_FILES.filter((f) => fs.existsSync(path.join(__dirname, f)));
     const uploadNext = (i) => {
-      if (i >= localFiles.length) {
+      if (i >= privateFiles.length) {
         console.log('✓ 配置已上传到 NAS（含飞书密钥与成员信息，仅存于 NAS，不进 git）');
         return restart();
       }
-      const f = localFiles[i];
-      const remotePath = REMOTE_DIR + '/' + f;
+      const f = privateFiles[i];
+      return guardUploadPrivate(sftp, f, () => uploadNext(i + 1));
+    };
+    // .env 是部署源头，直接传
+    exec('true', () => {
+      sftp.fastPut(path.join(__dirname, envFile), REMOTE_DIR + '/' + envFile, (err2) => {
+        if (err2) {
+          console.error('.env 上传失败:', err2.message);
+          conn.end();
+          process.exit(1);
+        }
+        console.log('✓ .env 已上传');
+        uploadNext(0);
+      });
+    });
+  });
+}
+
+// 私有配置保护上传：①NAS 现网有内容且与本地不同 → 先备份到项目外数据目录；
+// ②本地条目数少于现网 → 视为种子过期，跳过上传（PUSH_FORCE_PRIVATE=1 才覆盖）
+function guardUploadPrivate(sftp, f, done) {
+  const remotePath = REMOTE_DIR + '/' + f;
+  sftp.readFile(remotePath, 'utf8', (err, remoteContent) => {
+    const localContent = fs.readFileSync(path.join(__dirname, f), 'utf8');
+    const remoteCount = err ? 0 : countEntries(remoteContent);
+    const localCount = countEntries(localContent);
+
+    const proceed = () => {
       const mkdirCmd = 'mkdir -p ' + REMOTE_DIR + '/' + path.dirname(f);
       return exec(mkdirCmd, () => {
         sftp.fastPut(path.join(__dirname, f), remotePath, (err2) => {
@@ -210,11 +254,32 @@ function uploadEnv() {
             process.exit(1);
           }
           console.log(`✓ ${f} 已上传`);
-          uploadNext(i + 1);
+          done();
         });
       });
     };
-    uploadNext(0);
+
+    const backupThen = (next) => {
+      if (err || !remoteContent.trim() || remoteContent === localContent) return next();
+      const ts = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+      const backupPath = DATA_DIR + '/backup/' + f.replace(/\//g, '_') + '.' + ts + '.bak';
+      return exec('mkdir -p ' + DATA_DIR + '/backup', () => {
+        sftp.writeFile(backupPath, remoteContent, (err3) => {
+          if (err3) console.warn(`⚠ ${f} 现网备份失败（继续上传）:`, err3.message);
+          else console.log(`✓ ${f} 现网版本已备份: ${backupPath}`);
+          next();
+        });
+      });
+    };
+
+    if (remoteCount > localCount && process.env.PUSH_FORCE_PRIVATE !== '1') {
+      console.warn(`⚠ [私有配置保护] 跳过 ${f} 上传：本地 ${localCount} 条 < NAS 现网 ${remoteCount} 条（本地种子过期，权威在 NAS 侧）。`);
+      console.warn('  确认要用本地覆盖请设 PUSH_FORCE_PRIVATE=1 重跑；NAS 现网内容已回填本地以防丢失。');
+      // 把现网内容回写本地，消除种子与现网的落差（下次不再触发守卫）
+      fs.writeFileSync(path.join(__dirname, f), remoteContent);
+      return done();
+    }
+    backupThen(proceed);
   });
 }
 

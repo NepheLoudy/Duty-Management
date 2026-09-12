@@ -6,6 +6,7 @@ const dutyTable = require('./dutyTableService');
 const roster = require('./rosterService');
 const state = require('./stateStore');
 const compensation = require('./compensationService');
+const plaza = require('./plaza');
 
 // ============================================================
 // 私信闭环：D-1 提醒 → 当日询问（18:30，开启监听会话）→ 是/否/照片写回
@@ -140,6 +141,7 @@ async function handleYes(openId) {
   }
   await dutyTable.setStatus(rec.recordId, config.status.DONE);
   compensation.resetStreak(session.name);
+  plaza.append({ event: '值日完成', title: `${session.name}（${session.position}）` });
   const photos = rec.receiptCounts[session.position] || 0;
   return {
     handled: true,
@@ -285,6 +287,7 @@ async function requestLeave(member) {
 
   await dutyTable.setStatus(rec.recordId, config.status.LEAVE);
   const { penalty } = compensation.handleAbsence(member.name, rec.dateStr, config.status.LEAVE);
+  plaza.append({ event: '值日请假', title: `${member.name}（${rec.position}，${rec.dateStr}）` });
 
   const lines = [
     `✅ 已登记请假：${rec.dateStr}（${rec.position}）`,

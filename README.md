@@ -15,6 +15,8 @@
   （open_id 直取组织架构，无需逐人绑定；「绑定 姓名」降级为人工纠错兜底，admin 标记按姓名保留）；
   白名单（`config/whitelist.json`）仍为排除名单；定制窗口：`GET /api/duty/roster`、
   `GET|POST /api/duty/whitelist`（规则见顶层 AGENTS「机器人后端定制窗口」）；
+  **白名单/名册的权威在 NAS 侧文件**（运维台直写），本地 `config/*.json` 只是种子——
+  push.js 上传前会自动备份 NAS 现网版本，本地条目数少于现网时跳过上传（`PUSH_FORCE_PRIVATE=1` 强制覆盖），见顶层 AGENTS「运行时数据保护」；
 - **值日域管辖策略（权限管辖范畴/生效范畴）以本项目为单一事实来源**：`.env` 的
   `DUTY_GROUP_CHAT_IDS` 配置管辖群，经 `GET /api/duty/policy` 下发给 hub——看板触发词、
   关键词回答放行（@与未@）、基础指令关闭、未命中引导语、p2p 指令清单都随策略下发；

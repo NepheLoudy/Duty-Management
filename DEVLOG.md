@@ -117,3 +117,11 @@
 
 - `.env.example` 静默段补 `QUIET_BACKLOG_FILE=/home/qianli/duty-bot-data/quiet-backlog.json`：v9 代码已支持该变量、`.env` 已实际配置，模板欠账补齐（qianli-deploy「新增配置同步改 .env.example」约定；同批 bambu/ticket-bot 静默积压挪址收尾联动）。
 - v9 条目锚点回填 `f2220af`（原记「随本提交落地」）。
+
+### v11 · 2026-09-12 · 随本提交落地 · feat
+
+**动态广场事件流接入 + push.js 运行时数据保护（白名单事故整改）**
+
+- 动态广场：新增 `src/services/plaza.js`，值日完成（handleYes）/ 值日请假（requestLeave）事件写机器人项目看板「动态广场」表（`config.plaza` 默认表内置，`PLAZA_BITABLE_TABLE_ID` 可覆盖）；失败仅 warn 不影响主流程。建表脚本 `scripts/create-plaza-tables.js`（幂等：动态广场 + 网关活跃三表，主键改名走 PUT）入库。
+- 【运行时数据保护】push.js 上传私有配置（members/whitelist）前：①NAS 现网版本自动备份到 `/home/qianli/duty-bot-data/backup/`；②本地条目数少于现网时跳过上传并自动回填本地（`PUSH_FORCE_PRIVATE=1` 才强制覆盖）。事故背景：v9 推送曾用本地空 `whitelist.json` 覆盖 NAS 侧 18 人排除名单（不可恢复），规则与整改见顶层 AGENTS「运行时数据保护」。
+- README 补白名单权威说明；flow/policy 测试补 plaza 禁用隔离（防测试污染生产表），回归全过。
