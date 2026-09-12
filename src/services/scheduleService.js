@@ -183,10 +183,52 @@ async function getNextDuty(memberName) {
   return { date: rec.dateStr, position: rec.position };
 }
 
+/**
+ * 请假当日补位：从「更远的排班」抽调一人顶上（2026-09-12 口径：请假必须有补位）。
+ * 候选 = 值日队列成员（白名单排除后）中，在目标日之后仍有排班者；排除当日已有记录的人。
+ * 排序：与空缺同岗者优先 → 其排班日距目标日最远者优先（远一点的人余量最大）→ 姓名稳定序。
+ * 抽调是「加插」而非「对调」：被抽调者自己的远期班次保留，其今日多出的一次由
+ * 请假人的下周补偿义务在总量上对冲。找不到候选返回 null（当日空缺，仍记下周补偿）。
+ * @returns {{name, openId, position, dateStr, recordIds: Array} | null}
+ */
+async function arrangeReplacement({ dateStr, position, excludeName }) {
+  const all = await dutyTable.getAllDayRecords();
+  const queue = roster.getQueue();
+  const queueNames = new Set(queue.map((m) => m.name));
+  const busyOnDate = new Set(all.filter((r) => r.dateStr === dateStr).map((r) => r.name));
+
+  // 每个候选记其「最远的排班日」与是否担任过空缺岗位
+  const later = all.filter((r) => r.dateStr > dateStr && r.name && r.position);
+  const farthest = new Map();
+  const hasPosition = new Set();
+  for (const r of later) {
+    if (!queueNames.has(r.name) || r.name === excludeName) continue;
+    if (!farthest.has(r.name) || r.dateStr > farthest.get(r.name)) farthest.set(r.name, r.dateStr);
+    if (r.position === position) hasPosition.add(r.name);
+  }
+
+  const candidates = [...farthest.keys()].filter((n) => !busyOnDate.has(n));
+  if (!candidates.length) return null;
+  candidates.sort((a, b) => {
+    const pa = hasPosition.has(a) ? 0 : 1;
+    const pb = hasPosition.has(b) ? 0 : 1;
+    if (pa !== pb) return pa - pb;
+    if (farthest.get(a) !== farthest.get(b)) return farthest.get(a) < farthest.get(b) ? 1 : -1;
+    return a < b ? -1 : 1;
+  });
+
+  const picked = candidates[0];
+  const member = roster.findByName(picked) || { name: picked };
+  const recordIds = await dutyTable.createDayRecords(dateStr, [{ member, position }]);
+  console.log(`[补位] ${dateStr} ${position} 空缺，已抽调 ${picked}（远期班次 ${farthest.get(picked)}）补位`);
+  return { name: picked, openId: member.openId || '', position, dateStr, recordIds };
+}
+
 module.exports = {
   generate,
   renderGenerateReply,
   getBrief,
   getNextDuty,
   collectPendingInsertions,
+  arrangeReplacement,
 };

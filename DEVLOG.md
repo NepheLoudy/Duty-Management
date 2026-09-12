@@ -140,7 +140,7 @@
 - hub 断联兜底文案（DEFAULT_GUIDANCE，hub v78）同批同步同一句，下发与兜底口径保持一致。
 - 回归：policy/flow/board 套件通过（policy 对引导语只断言含「值日助手」，无需改断言）。
 
-### v14 · 2026-09-12 · 随本提交落地 · fix
+### v14 · 2026-09-12 · 5854556 · fix
 
 **全量 debug 批：白名单成员补偿义务不再丢失 + 文档纠偏**
 
@@ -150,3 +150,13 @@
 - `.env.example` 删去 QUIET_BACKLOG_FILE 重复两行中的一行。
 - DEVLOG 哈希回填：v10（45fb917）/ v11（ad2e794）/ v12（3f86bcb）/ v13（1d522cf）。
 - 回归：schedule/policy/flow/board/roster 五套 stub 全过（schedule 套件含插入语义断言）。
+
+### v15 · 2026-09-13 · 随本提交落地 · feat
+
+**M4 落地：值日看板卡「昨日战报」+ 请假当日抽调补位（用户口径拍板）**
+
+- M4「昨日值日播报」落地为**值日群一张卡同时播昨天今天**：buildBoardCard 增「昨日战报」段（昨日三岗状态+照片数，无昨日记录自动省略），12:00 自动播报与群内手动看板共用；原 pm-robot 消费 brief 的方案作废，`GET /api/duty/brief` 保留为通用数据接口，hub 的 `DUTY_WEBHOOK_URL`/`DUTY_BROADCAST_SCHEDULE` 降级为预留未接线键（hub .env.example 注释同批更新）。
+- **请假当日补位**（口径：有人请假必须有补位，从远一点的排班抽调）：requestLeave 登记请假后调用新增 `scheduleService.arrangeReplacement`——候选=值日队列（名册−白名单）中在请假日之后仍有排班者，同岗优先、排班日最远者优先；抽调为**加插非对调**（被抽调者远期班次保留），私信告知被抽调人（失败仅日志不阻断请假回执）；请假人仍进下周补偿，总量守恒；找不到候选时空缺（回执与对账报告可见）。未做完（收口才发现）无法当日补位，仍走下周补偿。
+- 测试：stub-test-flow 新增 3 条补位断言（同岗插记录/回执说明/私信反查验证当日同岗）+ 旧「目标周空位」断言改为**对账前 planInsertion 快照**（修真实日期敏感误报：安置本身会占掉空位日）；stub-test-board-webhook 新增 2 条卡片内容断言（有/无昨日数据）；schedule/flow/policy/board/roster 五套全过。
+- README：缺勤补偿节改写（补位语义）、12:00 播报口径、M4 落地说明、里程碑 M4 销项、pm-robot 预留键注记更新。
+- DEVLOG 哈希回填：v14（5854556）。

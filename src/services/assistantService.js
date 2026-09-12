@@ -1,5 +1,5 @@
 const config = require('../config');
-const { todayStr } = require('../utils/dates');
+const { addDays, todayStr } = require('../utils/dates');
 const bot = require('../feishu/bot');
 const webhook = require('../feishu/webhook');
 const roster = require('./rosterService');
@@ -14,10 +14,10 @@ const policy = require('./policyService');
 // - 私信（精确匹配）：值日助手 / 我要请假 / 查询我的下一次值日 / 绑定 X /
 //   是 / 否 / 生成排班表（仅名册 admin）；打卡确认口语变体（是的/完成了 等）
 //   在有当日活跃询问会话时等同「是」，无会话静默交还 hub 走常规流程
-// - 群聊（@机器人 值日助手）：今日值日状态看板卡片，每群 1 小时限流一次，
-//   命中限流静默；发送通道为群自定义机器人 webhook（非对话型），
-//   未配置 DUTY_BOARD_WEBHOOK_URL 时回退应用身份 im API 直发
-// - 看板自动播报：每日 12:00（cron）经 webhook 推同一张今日值日看板卡
+// - 群聊（@机器人 值日助手）：值日状态看板卡片（今日三岗 + 昨日战报，一个面板同时
+//   播昨天今天），每群 1 小时限流一次，命中限流静默；发送通道为群自定义机器人
+//   webhook（非对话型），未配置 DUTY_BOARD_WEBHOOK_URL 时回退应用身份 im API 直发
+// - 看板自动播报：每日 12:00（cron）经 webhook 推同一张卡
 //   （broadcastTodayBoard，/api/bot/test-board 手动触发共用）
 // - 图片载荷：{type:'image', openId, imageKey, messageId}
 // ============================================================
@@ -25,7 +25,7 @@ const policy = require('./policyService');
 const HELP_TEXT = [
   '🧹 值日助手用法（指令带不带 / 都可以）：',
   '· 「查询我的下一次值日」—— 下次值日日期与岗位',
-  '· 「我要请假」—— 登记请假（当次置已请假，下周自动补插一次值日）',
+  '· 「我要请假」—— 登记请假（当次置已请假，机器人会从较远的排班抽调一人当日补位并私信告知；下周仍自动补插一次值日）',
   '· 「绑定 姓名」—— 首次使用绑定账号（提醒与确认走私信）',
   '· 「是」/「否」—— 值日日 18:30 询问后的完成确认（口语如「是的」「完成了」也可；照片可直接发我，22:00 收口）',
   '· 「生成排班表」—— 管理员专用，按日历向下生成一个月排班',
@@ -34,20 +34,52 @@ const HELP_TEXT = [
   '若你同时收到项目管理 DDL 逾期确认，回复的「是」会先被它占用——打卡未成功请再发一次「是」。',
 ].join('\n');
 
-/** 今日值日状态看板卡片 */
-function buildBoardCard(dateStr, records) {
+/**
+ * 值日状态看板卡片（一个面板同时播昨天今天，2026-09-12 口径）：
+ * 今日三岗状态 + 昨日战报段（有昨日记录才显示）。
+ * @param {string} dateStr 今日日期
+ * @param {Array} records 今日记录
+ * @param {{date: string, records: Array} | null} yesterday 昨日数据（调用方取好传入，取不到传 null）
+ */
+function buildBoardCard(dateStr, records, yesterday) {
   const dayStatus = dutyTable.computeDayStatus(records)
     || records.map((r) => r.dayStatus).find(Boolean)
     || null;
 
-  const lines = ['总负责', '工位区', '装配区'].map((pos) => {
-    const rec = records.find((r) => r.position === pos);
+  const lineFor = (rec, pos) => {
     if (!rec) return `· ${pos}：（暂无排班）`;
     const statusText = rec.status || '待定';
     const photoText = (rec.receiptCounts[pos] || 0) > 0 ? ` 📎${rec.receiptCounts[pos]}` : '';
     const unbound = rec.name ? '' : '（未绑定）';
     return `· ${pos}：${rec.name || '（未绑定）'} —— ${statusText}${photoText}${unbound}`;
-  });
+  };
+
+  const lines = ['总负责', '工位区', '装配区'].map((pos) =>
+    lineFor(records.find((r) => r.position === pos), pos));
+
+  const elements = [
+    { tag: 'markdown', content: `**📅 ${dateStr}**　总状态：${dayStatus || '未完成/待定'}` },
+    { tag: 'hr' },
+    { tag: 'markdown', content: lines.join('\n') },
+  ];
+
+  if (yesterday && yesterday.records && yesterday.records.length) {
+    const yStatus = dutyTable.computeDayStatus(yesterday.records)
+      || yesterday.records.map((r) => r.dayStatus).find(Boolean)
+      || null;
+    const yLines = ['总负责', '工位区', '装配区'].map((pos) =>
+      lineFor(yesterday.records.find((r) => r.position === pos), pos));
+    elements.push(
+      { tag: 'hr' },
+      { tag: 'markdown', content: `**🕘 昨日（${yesterday.date}）战报**　总状态：${yStatus || '未完成'}` },
+      { tag: 'markdown', content: yLines.join('\n') },
+    );
+  }
+
+  elements.push(
+    { tag: 'hr' },
+    { tag: 'markdown', content: '> 排班查询 / 请假 / 打卡确认均在私信办理：私信机器人「值日助手」可查询排班、请假；完成后请私信回复「是」并上传照片，22:00 收口。' },
+  );
 
   return {
     config: { wide_screen_mode: true },
@@ -55,14 +87,20 @@ function buildBoardCard(dateStr, records) {
       template: dayStatus ? 'green' : (records.length ? 'orange' : 'grey'),
       title: { content: '🧹 今日值日看板', tag: 'plain_text' },
     },
-    elements: [
-      { tag: 'markdown', content: `**📅 ${dateStr}**　总状态：${dayStatus || '未完成/待定'}` },
-      { tag: 'hr' },
-      { tag: 'markdown', content: lines.join('\n') },
-      { tag: 'hr' },
-      { tag: 'markdown', content: '> 排班查询 / 请假 / 打卡确认均在私信办理：私信机器人「值日助手」可查询排班、请假；完成后请私信回复「是」并上传照片，22:00 收口。' },
-    ],
+    elements,
   };
+}
+
+/** 取昨日记录（看板「昨日战报」段数据源；失败/无记录返回 null） */
+async function getYesterdaySection() {
+  try {
+    const yDate = addDays(todayStr(), -1);
+    const yRecs = await dutyTable.getRecordsByDate(yDate);
+    return yRecs.length ? { date: yDate, records: yRecs } : null;
+  } catch (err) {
+    console.warn('[看板] 昨日记录读取失败（看板只展示今日）:', err.message);
+    return null;
+  }
 }
 
 /** 群看板（每群 1 小时限流，命中静默；先占限流戳再发卡，避免并发窗口连发两张） */
@@ -79,7 +117,7 @@ async function handleGroupBoard(chatId) {
 
   try {
     const records = await dutyTable.getRecordsByDate(todayStr());
-    const card = buildBoardCard(todayStr(), records);
+    const card = buildBoardCard(todayStr(), records, await getYesterdaySection());
     if (config.board.webhookUrl) {
       // 主通道：群自定义机器人 webhook（非对话型）；限流仍按来源群 chatId 计
       await webhook.sendCardToWebhook(config.board.webhookUrl, config.board.webhookSecret, card);
@@ -106,7 +144,7 @@ async function broadcastTodayBoard({ dryRun = false } = {}) {
     console.log('[看板播报] 今日无排班记录，跳过');
     return { skipped: true, reason: 'no_records', date: todayStr() };
   }
-  const card = buildBoardCard(todayStr(), records);
+  const card = buildBoardCard(todayStr(), records, await getYesterdaySection());
   if (dryRun) {
     return {
       skipped: false,

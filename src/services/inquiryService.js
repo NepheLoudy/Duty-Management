@@ -6,6 +6,7 @@ const dutyTable = require('./dutyTableService');
 const roster = require('./rosterService');
 const state = require('./stateStore');
 const compensation = require('./compensationService');
+const scheduleService = require('./scheduleService');
 const plaza = require('./plaza');
 
 // ============================================================
@@ -289,9 +290,35 @@ async function requestLeave(member) {
   const { penalty } = compensation.handleAbsence(member.name, rec.dateStr, config.status.LEAVE);
   plaza.append({ event: '值日请假', title: `${member.name}（${rec.position}，${rec.dateStr}）` });
 
+  // 请假当日补位（2026-09-12 口径）：从较远的排班抽调一人顶上；找不到候选则当日空缺
+  let replacement = null;
+  try {
+    replacement = await scheduleService.arrangeReplacement({
+      dateStr: rec.dateStr,
+      position: rec.position,
+      excludeName: member.name,
+    });
+  } catch (err) {
+    console.error('[补位] 抽调失败（请假登记不受影响）:', err.message);
+  }
+  if (replacement && replacement.openId) {
+    // 私信被抽调人（失败不阻断请假回执，日志留痕管理员可转告）
+    try {
+      await bot.sendTextToUser(
+        replacement.openId,
+        `🧹 补位通知：${rec.dateStr}（${rec.position}）的值日因 ${member.name} 请假，已安排你补位。\n`
+        + '完成后请照常私信回复「是」并上传照片，22:00 前完成即可。谢谢你！',
+      );
+    } catch (err) {
+      console.error(`[补位] 通知 ${replacement.name} 失败:`, err.message);
+    }
+  }
+
   const lines = [
     `✅ 已登记请假：${rec.dateStr}（${rec.position}）`,
-    '该日的值日将由其余成员照常进行，当日总状态会因此记为未完成。',
+    replacement
+      ? `补位安排：已从较远的排班抽调 ${replacement.name} 当日顶上（你会收到下周补偿安排，工作量总量不变）。`
+      : '暂无可抽调人选，当日该岗将空缺，管理员会另行安排。',
     `补偿安排：下周（${rec.dateStr} 所在周的下一周）会自动插入一次值日，生成排班表时优先安置。`,
   ];
   if (penalty) {

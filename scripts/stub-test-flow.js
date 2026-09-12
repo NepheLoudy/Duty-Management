@@ -172,11 +172,43 @@ function check(desc, cond, detail = '') {
   const fourDay = genReal.days.find((d) => d.items.length === 4);
   check('生成：出现 4 人插入日', Boolean(fourDay), JSON.stringify(genReal.days.slice(0, 3)));
 
-  // ---- 6. 请假（队员D 未来班次 → 已请假 + 新义务） ----
+  // ---- 6. 请假（队员D 未来班次 → 已请假 + 新义务 + 当日抽调补位） ----
   const leave = await inquiry.requestLeave(roster.findByName('队员D'));
   check('队员D 请假成功', leave.handled && leave.reply.includes('已登记请假'), leave.reply);
   const pendingOb = state.load().obligations.filter((o) => !o.placed);
   check('请假生成 1 条下周插入义务', pendingOb.length === 1 && pendingOb[0].name === '队员D', JSON.stringify(pendingOb));
+  // 补位（2026-09-12 口径）：请假日插入第 4 条记录（同岗、非请假人），并私信被抽调人。
+  // 从私信反查被抽调人再验证其当日同岗记录（当日可能存在早前插入的同岗记录，正向 find 会歧义）
+  let dCanPlace = null; // 对账前快照：D 的义务能否就地安置（供步骤 7 断言用）
+  {
+    const algo = require('../src/services/scheduleAlgo');
+    const all = await dutyTable.getAllDayRecords();
+    const dLeave = all.find((r) => r.name === '队员D' && r.status === '已请假');
+    const sameDay = all.filter((r) => r.dateStr === dLeave.dateStr);
+    check('请假当日抽调补位：同岗新增 1 条记录（非请假人）',
+      sameDay.filter((r) => r.name !== '队员D' && r.position === dLeave.position).length >= 1,
+      JSON.stringify({ leaveDate: dLeave.dateStr, position: dLeave.position, sameDay: sameDay.map((r) => [r.name, r.position, r.status]) }));
+    check('请假回执说明补位安排', leave.reply.includes('补位'), leave.reply);
+    const notice = memory.dmCalls.find((c) => c.text.includes('补位通知'));
+    const coverName = notice ? (roster.getMembers().find((m) => m.openId === notice.openId) || {}).name : null;
+    check('被抽调人收到补位私信（且确为当日同岗补位者）',
+      Boolean(notice) && Boolean(coverName) && sameDay.some((r) => r.name === coverName && r.position === dLeave.position),
+      JSON.stringify({ matched: notice && notice.openId, coverName }));
+
+    // 目标周能否安置 D 的义务——快照必须取**对账前**：安置本身会占掉空位日，
+    // 对账后再算会自相矛盾（该断言曾对真实日期敏感误报，2026-09-13 修正）
+    const weekStart = addDays(mondayOf(dLeave.dateStr), 7);
+    const weekEnd = addDays(weekStart, 6);
+    const assignments = new Map();
+    for (const r of all) {
+      if (!assignments.has(r.dateStr)) assignments.set(r.dateStr, []);
+      assignments.get(r.dateStr).push({ name: r.name, position: r.position });
+    }
+    dCanPlace = Boolean(algo.planInsertion({
+      weekStartStr: weekStart, rangeStart: weekStart, rangeEnd: weekEnd,
+      memberName: '队员D', assignments,
+    }));
+  }
 
   // ---- 7. 对账（含：admin 手工标记的已请假也要补登记进下周队列） ----
   {
@@ -193,22 +225,9 @@ function check(desc, cond, detail = '') {
   check('对账：补登记有回执提示', recon.report.includes('补登记 1 条'), recon.report);
   const recon2 = await compensation.reconcile({});
   check('对账：同一条手工标记不重复登记（去重）', !recon2.report.includes('补登记'), recon2.report);
-  // 队员D 义务就地安置的前提：目标周内存在他没有班次的空位日
-  //（4 人小队间隔约束放宽后可能整周天天在班，此时留队为正确行为）
-  {
-    const all = await dutyTable.getAllDayRecords();
-    const dLeave = all.find((r) => r.name === '队员D' && r.status === '已请假');
-    const weekStart = addDays(mondayOf(dLeave.dateStr), 7);
-    const weekEnd = addDays(weekStart, 6);
-    const dDays = new Set(all.filter((r) => r.name === '队员D' && r.dateStr >= weekStart && r.dateStr <= weekEnd).map((r) => r.dateStr));
-    let hasFreeDay = false;
-    for (let d = weekStart; d <= weekEnd; d = addDays(d, 1)) {
-      if (!dDays.has(d)) hasFreeDay = true;
-    }
-    check('对账：队员D 义务按目标周空位情况正确处置',
-      hasFreeDay ? recon2.stillQueued.length === 0 : recon2.stillQueued.length === 1,
-      `hasFreeDay=${hasFreeDay} queued=${recon2.stillQueued.length}`);
-  }
+  check('对账：队员D 义务按目标周空位情况正确处置',
+    dCanPlace ? recon2.stillQueued.length === 0 : recon2.stillQueued.length === 1,
+    `canPlace(对账前)=${dCanPlace} queued=${recon2.stillQueued.length}`);
 
   // ---- 8. 值日助手指令 ----
   const help = await assistant.handleCommand({ command: '值日助手', openId: 'ou_test_a', chatType: 'p2p' });

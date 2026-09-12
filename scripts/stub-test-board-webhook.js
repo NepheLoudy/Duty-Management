@@ -188,6 +188,22 @@ const server = http.createServer((req, res) => {
     && chatCards.filter((c) => c === 'oc_managed_a').length === 2,
     JSON.stringify({ whFail, chatCards }));
 
+  // 卡片内容：一个面板同时播昨天今天（2026-09-12 口径）——有昨日数据带「昨日战报」段，无则不带
+  {
+    const today = require('../src/utils/dates').todayStr();
+    const todayRecs = [{ name: '队员A', position: '总负责', status: '待定', receiptCounts: { 总负责: 0, 工位区: 0, 装配区: 0 } }];
+    const yRecs = [{ name: '队员A', position: '总负责', status: '已做完', receiptCounts: { 总负责: 2, 工位区: 0, 装配区: 0 } }];
+    const withY = assistant.buildBoardCard(today, todayRecs, { date: '2026-09-12', records: yRecs });
+    const withoutY = assistant.buildBoardCard(today, todayRecs, null);
+    const flat = (card) => card.elements.filter((e) => e.tag === 'markdown').map((e) => e.content).join('\n');
+    check('看板卡：有昨日数据 → 含「昨日战报」段（昨日状态与照片数）',
+      flat(withY).includes('昨日（2026-09-12）战报') && flat(withY).includes('已做完') && flat(withY).includes('📎2'),
+      flat(withY));
+    check('看板卡：无昨日数据 → 不含昨日段',
+      !flat(withoutY).includes('昨日（'),
+      flat(withoutY));
+  }
+
   server.close();
   console.log(failed === 0 ? `\n全部通过 ✅（临时目录 ${TMP}）` : `\n${failed} 项失败 ❌`);
   process.exit(failed === 0 ? 0 : 1);
