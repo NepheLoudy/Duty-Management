@@ -125,3 +125,9 @@
 - 动态广场：新增 `src/services/plaza.js`，值日完成（handleYes）/ 值日请假（requestLeave）事件写机器人项目看板「动态广场」表（`config.plaza` 默认表内置，`PLAZA_BITABLE_TABLE_ID` 可覆盖）；失败仅 warn 不影响主流程。建表脚本 `scripts/create-plaza-tables.js`（幂等：动态广场 + 网关活跃三表，主键改名走 PUT）入库。
 - 【运行时数据保护】push.js 上传私有配置（members/whitelist）前：①NAS 现网版本自动备份到 `/home/qianli/duty-bot-data/backup/`；②本地条目数少于现网时跳过上传并自动回填本地（`PUSH_FORCE_PRIVATE=1` 才强制覆盖）。事故背景：v9 推送曾用本地空 `whitelist.json` 覆盖 NAS 侧 18 人排除名单（不可恢复），规则与整改见顶层 AGENTS「运行时数据保护」。
 - README 补白名单权威说明；flow/policy 测试补 plaza 禁用隔离（防测试污染生产表），回归全过。
+
+### v12 · 2026-09-12 · 随本提交落地 · fix
+
+**tar 打包排除私有配置（堵住 SFTP 兜底路径绕过守卫的漏洞）**
+
+- v11 的备份+守卫只护住了 fastPut 上传步；SFTP 兜底部署是先 `rm -rf` 清目录再解 tar——本地种子会随 tar 在守卫前覆盖 NAS 现网。本版把 `config/members.json`、`config/whitelist.json` 加入 tar 排除，清目录不再波及（文件由 uploadEnv 的守卫路径唯一写入；git fetch 主路径本就保留未跟踪文件）。

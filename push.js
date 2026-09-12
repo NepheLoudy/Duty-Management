@@ -159,6 +159,8 @@ async function deployCode() {
       '--exclude=node_modules',
       '--exclude=.git',
       '--exclude=.env',
+      '--exclude=config/members.json',
+      '--exclude=config/whitelist.json',
       '--exclude=.duty-state.json',
       '--exclude=.quiet-backlog.json',
       '--exclude=logs',
