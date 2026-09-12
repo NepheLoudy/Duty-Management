@@ -157,7 +157,12 @@ function generateSchedule({ members, startDateStr, days, history = [], insertion
 
   // -- 1) 补偿插入优先安置（可突破轮次上限，该日变成 4 人） --
   for (const ins of insertions) {
-    if (!quotas.has(ins.name)) continue; // 不在队列（如白名单成员），丢弃并上报
+    if (!quotas.has(ins.name)) {
+      // 不在值日队列（如白名单成员）：补偿义务不豁免，进未安置队列留
+      // placePending 兜底安置（00:30 对账），并随生成回执上报
+      unplacedInsertions.push(ins);
+      continue;
+    }
     const plan = planInsertion({
       weekStartStr: ins.weekStartStr,
       rangeStart: startDateStr,

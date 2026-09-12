@@ -111,14 +111,14 @@
 - 文案口径：看板 footer 明示「完成后请**私信**回复『是』」（原文案诱导群内回复，群里的「是」只会得到引导语——「关键词和@指令撞了」观感的直接来源之一）；18:30 询问与 HELP 注明「若同时收到 DDL 逾期确认，『是』会先被其占用，打卡未成功请再发一次」。
 - 测试：test:policy 断言更新为 20 词清单；test:board 播报段改断言回退语义（未配置/推送失败 → `via:'app'` 直发管辖群）并补 webhook 故障注入；flow/policy/board 补 `DUTY_BOARD_WEBHOOK_URL=''` 环境隔离（测试不再依赖本地 .env 缺键）；五套件全过。
 
-### v10 · 2026-09-12 · 随本提交落地 · docs
+### v10 · 2026-09-12 · 45fb917 · docs
 
 **.env.example 补 QUIET_BACKLOG_FILE + v9 锚点回填**
 
 - `.env.example` 静默段补 `QUIET_BACKLOG_FILE=/home/qianli/duty-bot-data/quiet-backlog.json`：v9 代码已支持该变量、`.env` 已实际配置，模板欠账补齐（qianli-deploy「新增配置同步改 .env.example」约定；同批 bambu/ticket-bot 静默积压挪址收尾联动）。
 - v9 条目锚点回填 `f2220af`（原记「随本提交落地」）。
 
-### v11 · 2026-09-12 · 随本提交落地 · feat
+### v11 · 2026-09-12 · ad2e794 · feat
 
 **动态广场事件流接入 + push.js 运行时数据保护（白名单事故整改）**
 
@@ -126,16 +126,27 @@
 - 【运行时数据保护】push.js 上传私有配置（members/whitelist）前：①NAS 现网版本自动备份到 `/home/qianli/duty-bot-data/backup/`；②本地条目数少于现网时跳过上传并自动回填本地（`PUSH_FORCE_PRIVATE=1` 才强制覆盖）。事故背景：v9 推送曾用本地空 `whitelist.json` 覆盖 NAS 侧 18 人排除名单（不可恢复），规则与整改见顶层 AGENTS「运行时数据保护」。
 - README 补白名单权威说明；flow/policy 测试补 plaza 禁用隔离（防测试污染生产表），回归全过。
 
-### v12 · 2026-09-12 · 随本提交落地 · fix
+### v12 · 2026-09-12 · 3f86bcb · fix
 
 **tar 打包排除私有配置（堵住 SFTP 兜底路径绕过守卫的漏洞）**
 
 - v11 的备份+守卫只护住了 fastPut 上传步；SFTP 兜底部署是先 `rm -rf` 清目录再解 tar——本地种子会随 tar 在守卫前覆盖 NAS 现网。本版把 `config/members.json`、`config/whitelist.json` 加入 tar 排除，清目录不再波及（文件由 uploadEnv 的守卫路径唯一写入；git fetch 主路径本就保留未跟踪文件）。
 
-### v13 · 2026-09-12 · 随本提交落地 · fix
+### v13 · 2026-09-12 · 1d522cf · fix
 
 **值日群引导语改纯行动指引（删「专用群/彩蛋照常有效」说明性内容）**
 
 - 用户反馈：引导语不该通知「关键词彩蛋照常有效」这类能力范围说明，提示只保留「应该怎么做」。GROUP_GUIDANCE 删去「本群为值日/快递申领专用群」「关键词彩蛋照常有效」，只留两句行动指引：@我 发送「值日助手」查看今日值日；查询排班、请假、打卡确认请私信机器人。
 - hub 断联兜底文案（DEFAULT_GUIDANCE，hub v78）同批同步同一句，下发与兜底口径保持一致。
 - 回归：policy/flow/board 套件通过（policy 对引导语只断言含「值日助手」，无需改断言）。
+
+### v14 · 2026-09-12 · 随本提交落地 · fix
+
+**全量 debug 批：白名单成员补偿义务不再丢失 + 文档纠偏**
+
+- 修复：生成排表路径对不在值日队列成员（如白名单/排除名单成员）的补偿插入义务原是静默丢弃（scheduleAlgo 直接 `continue` 且不进未安置上报），却因「不在 unplacedInsertions 即视为已安置」被误标 placed——义务凭空消失，违反「白名单成员补偿义务不豁免」口径，且与 00:30 对账路径（placePending 不豁免）行为分裂。现改为进未安置队列：生成回执如实上报「N 条补偿插入保留在队列」，placePending 照常为其就地安置（本就不查排除名单）。
+- 纠偏：README 把未实施的 M4「昨日值日播报」写成进行时（pm-robot 消费 brief），改回「规划中、暂无消费方」；里程碑 M3 两条矛盾行合并为已上线（v65/v74）+ 待真机验收。
+- 建表脚本补「网关队员活跃」表 `open_id` 字段（gateway v17 起写入该列，脚本此前落后于线上表结构）。
+- `.env.example` 删去 QUIET_BACKLOG_FILE 重复两行中的一行。
+- DEVLOG 哈希回填：v10（45fb917）/ v11（ad2e794）/ v12（3f86bcb）/ v13（1d522cf）。
+- 回归：schedule/policy/flow/board/roster 五套 stub 全过（schedule 套件含插入语义断言）。

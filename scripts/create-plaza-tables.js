@@ -43,6 +43,7 @@ const TABLES = [
   ] },
   { name: '网关队员活跃', primaryName: '日期', fields: [
     { field_name: '成员', type: 1 },
+    { field_name: 'open_id', type: 1 },
     { field_name: '消息数', type: 2, property: { formatter: '0' } },
   ] },
 ];

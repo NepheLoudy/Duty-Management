@@ -26,7 +26,7 @@
   未配置时回退应用身份直发）；**每日 12:00 自动播报同一张今日值日看板卡**
   （`DUTY_BOARD_BROADCAST_SCHEDULE`，过静默闸门；未配置 webhook 或推送失败时同样回退
   应用身份直发管辖群，无排班记录自动跳过）；
-- 群内每日播报（昨日结果+今日名单）由 **pm-robot** 经群 webhook 渲染发送（`GET /api/duty/brief` 取数）。
+- M4 群内每日播报（昨日结果+今日名单）**规划**由 **pm-robot** 经群 webhook 渲染发送（`GET /api/duty/brief` 取数）——**暂未实施，brief 暂无消费方**；duty-bot 自身的「今日值日看板」12:00 自动播报已上线（见上条）。
 
 ## 数据模型（多维表格 = 单一事实来源）
 
@@ -94,7 +94,7 @@
 | --- | --- | --- |
 | GET | `/api/health` | 健康检查（含静默窗口状态） |
 | POST | `/api/chat/command` | hub 指令转发：`{command, openId, chatType, chatId?, messageId?, args?}`；图片 `{type:'image', openId, imageKey, messageId}`；返回 `{reply, handled}`，reply 空串=已自行处理（群看板卡片）或未接管（无会话口语变体，hub 落回常规流程） |
-| GET | `/api/duty/brief` | 昨日结果+今日名单一次取齐（pm-robot 播报数据源） |
+| GET | `/api/duty/brief` | 昨日结果+今日名单一次取齐（M4 pm-robot 播报数据源，暂无消费方） |
 | POST | `/api/bot/test-remind` / `test-ask` / `test-close` / `test-reconcile` / `test-generate` / `test-board` | 手动触发（body `{"dryRun":true}` 只预览不发送/不落表） |
 | GET | `/api/bot/cron-status` | 定时任务与静默状态 |
 
@@ -154,7 +154,7 @@ npm run table:create    # 自动新建 Bitable+排班表（打印 app_token/tabl
 - ✅ M1 排班引擎（纯函数 + 单测 18 项全过）
 - ✅ M2 私信闭环（stub 全流程 34 项全过；真机验证待表格与名册就绪）
 - ✅ duty-bot 侧 `/api/duty/brief` 与值日助手指令层（hub 转发分支为 M3，与 hub 同批上线）
-- ⬜ M3 hub 转发（chatService 值日分支 + p2p 图片最小转发 + 群看板）
+- ✅ M3 hub 转发（chatService 值日分支 + p2p 图片最小转发 + 群看板，v65/v74 上线）
 - ⬜ M4 pm-robot `runDutyBroadcast`（新群 12:00 卡片：昨日结果+今日名单+语录）
 - ✅ M5 首次 `npm run push` 上线（2026-09-11，仓库 Duty-Management，NAS pm2 duty-bot）+ 顶层 AGENTS.md/DEVLOG 联动归档
-- ⬜ M3 hub 转发分支已上线（v65），待表格/名册就绪后全链路真机验收
+- ⬜ M3 全链路真机验收（代码已上线 v65/v74，待表格/名册就绪后走一遍）
