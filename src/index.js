@@ -1,4 +1,5 @@
 const express = require('express');
+const { requireApiToken } = require('./auth');
 const cors = require('cors');
 const config = require('./config');
 const roster = require('./services/rosterService');
@@ -83,7 +84,7 @@ app.get('/api/duty/policy', (req, res) => {
 });
 
 // 管辖范畴在线改写（定制窗口写入口）：{ groupChatIds: ["oc_..."] }（空数组 = 不限制）
-app.post('/api/duty/policy', (req, res) => {
+app.post('/api/duty/policy', requireApiToken, (req, res) => {
   const ids = req.body?.groupChatIds;
   if (!Array.isArray(ids)) return res.status(400).json({ error: 'groupChatIds 必须是数组' });
   const clean = ids.map((s) => String(s).trim()).filter(Boolean);
@@ -115,7 +116,7 @@ app.get('/api/duty/roster', (req, res) => {
 });
 
 // 手动触发通讯录同步（启动/生成排班前也会自动同步）
-app.post('/api/duty/roster/refresh', async (req, res) => {
+app.post('/api/duty/roster/refresh', requireApiToken, async (req, res) => {
   try {
     const members = await roster.syncFromContacts();
     res.json({ success: true, total: members.length });
@@ -130,7 +131,7 @@ app.get('/api/duty/whitelist', (req, res) => {
   res.json({ names: roster.loadWhitelistNames() });
 });
 
-app.post('/api/duty/whitelist', (req, res) => {
+app.post('/api/duty/whitelist', requireApiToken, (req, res) => {
   const { add = [], remove = [] } = req.body || {};
   const names = roster.updateWhitelist({ add, remove });
   res.json({ success: true, names });
@@ -151,7 +152,7 @@ app.get('/api/duty/brief', async (req, res) => {
 
 // ---------- 手动触发接口（测试/运维用；人工当下主动触发不受静默限制） ----------
 
-app.post('/api/bot/test-remind', async (req, res) => {
+app.post('/api/bot/test-remind', requireApiToken, async (req, res) => {
   try {
     res.json({ success: true, result: await inquiry.sendPrevDayRemind({ dryRun: !!req.body?.dryRun }) });
   } catch (err) {
@@ -159,7 +160,7 @@ app.post('/api/bot/test-remind', async (req, res) => {
   }
 });
 
-app.post('/api/bot/test-ask', async (req, res) => {
+app.post('/api/bot/test-ask', requireApiToken, async (req, res) => {
   try {
     res.json({ success: true, result: await inquiry.askToday({ dryRun: !!req.body?.dryRun }) });
   } catch (err) {
@@ -167,7 +168,7 @@ app.post('/api/bot/test-ask', async (req, res) => {
   }
 });
 
-app.post('/api/bot/test-close', async (req, res) => {
+app.post('/api/bot/test-close', requireApiToken, async (req, res) => {
   try {
     // 手动触发不受静默限制（bypassQuiet：回执直接发送，不落积压）
     res.json({ success: true, result: await runClose({ dryRun: !!req.body?.dryRun, bypassQuiet: true }) });
@@ -176,7 +177,7 @@ app.post('/api/bot/test-close', async (req, res) => {
   }
 });
 
-app.post('/api/bot/test-reconcile', async (req, res) => {
+app.post('/api/bot/test-reconcile', requireApiToken, async (req, res) => {
   try {
     res.json({ success: true, result: await compensation.reconcile({ dryRun: !!req.body?.dryRun }) });
   } catch (err) {
@@ -186,7 +187,7 @@ app.post('/api/bot/test-reconcile', async (req, res) => {
 
 // 排班生成（默认 dryRun 只出预览；带 {"confirm":true} 才正式写表。
 // 正式生成建议仍由管理员私信触发，这里主要作预览/核对用）
-app.post('/api/bot/test-generate', async (req, res) => {
+app.post('/api/bot/test-generate', requireApiToken, async (req, res) => {
   try {
     const dryRun = !req.body?.confirm;
     const result = await scheduleService.generate({ dryRun });
@@ -198,7 +199,7 @@ app.post('/api/bot/test-generate', async (req, res) => {
 
 // 看板自动播报（与 12:00 cron 同一执行链；默认 dryRun 只预览，{"confirm":true} 才实发。
 // 人工当下触发不走静默闸门，与其它 test-* 口径一致）
-app.post('/api/bot/test-board', async (req, res) => {
+app.post('/api/bot/test-board', requireApiToken, async (req, res) => {
   try {
     const dryRun = !req.body?.confirm;
     res.json({ success: true, result: await assistant.broadcastTodayBoard({ dryRun }) });

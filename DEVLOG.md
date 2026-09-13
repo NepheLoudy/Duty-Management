@@ -210,3 +210,10 @@
 8. 并发请假竞态（读全表→选候选→写补位）——全局请假串行链。
 9. 状态文件损坏被空状态静默覆盖——原子写（tmp+rename）+ 损坏文件另存 .corrupt.bak 保留现场。
 回归：五套 stub 全过（flow 新增收口幂等断言、补位断言改结局二选一——4 人队全员在班时无可抽调属正确行为）。
+
+### v21 · 2026-09-13 · 随本提交落地 · feat
+
+**管理端点鉴权 + 部署前测试闸门（体系推荐 R2/R4，用户授权先做）**
+
+- 新增 src/auth.js（gateway 同款模板）：/api/duty/policy、/api/duty/whitelist、/api/duty/roster/refresh、/api/bot/test-* 写/触发端点需 X-API-Token（API_TOKEN 全局共享值，fail-closed）。运维台代理自动带头，手动 SSH curl 需自带。
+- push.js 加部署前测试闸门（R4）：五套 stub 全过才部署，SKIP_TESTS=1 可跳。

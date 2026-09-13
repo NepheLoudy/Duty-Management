@@ -11,6 +11,7 @@ const fs = require('fs');
 // ---- 环境隔离（必须在 require 任何 src 模块前设置） ----
 const TMP = fs.mkdtempSync(path.join(os.tmpdir(), 'duty-bot-roster-test-'));
 process.env.QUIET_HOURS_DISABLED = '1';
+process.env.API_TOKEN = 'test-token'; // 管理端点鉴权（2026-09-13）：测试请求带头
 process.env.DUTY_STATE_FILE = path.join(TMP, 'state.json');
 process.env.DUTY_MEMBERS_FILE = path.join(TMP, 'members.json');
 process.env.DUTY_WHITELIST_FILE = path.join(TMP, 'whitelist.json');
@@ -70,12 +71,13 @@ function check(desc, cond, detail = '') {
     jia && jia.admin === true && jia.inQueue === true && bing && bing.whitelisted === true && bing.inQueue === false,
     JSON.stringify({ jia, bing }));
 
-  const refresh = await (await fetch(`${base}/api/duty/roster/refresh`, { method: 'POST' })).json();
+  const authHdr = { 'X-API-Token': 'test-token' };
+  const refresh = await (await fetch(`${base}/api/duty/roster/refresh`, { method: 'POST', headers: authHdr })).json();
   check('POST /api/duty/roster/refresh：手动同步成功', refresh.success === true && refresh.total === 3, JSON.stringify(refresh));
 
   const wlBefore = await (await fetch(`${base}/api/duty/whitelist`)).json();
-  const wlAdd = await (await fetch(`${base}/api/duty/whitelist`, {
-    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ add: ['队员乙'], remove: ['队员丙'] }),
+  const wlAdd = await (await fetch(`${base}/api/duty/whitelist`, { headers: { ...authHdr, 'Content-Type': 'application/json' },
+    method: 'POST', body: JSON.stringify({ add: ['队员乙'], remove: ['队员丙'] }),
   })).json();
   check('POST /api/duty/whitelist：增删即时生效',
     wlBefore.names.includes('队员丙') && wlAdd.names.includes('队员乙') && !wlAdd.names.includes('队员丙'),
@@ -85,7 +87,9 @@ function check(desc, cond, detail = '') {
   server.closeAllConnections?.();
   server.close();
   console.log(failed === 0 ? `\n全部通过 ✅（临时目录 ${TMP}）` : `\n${failed} 项失败 ❌`);
-  process.exit(failed === 0 ? 0 : 1);
+  // 延迟退出（2026-09-13）：Windows 上 undici keep-alive 偶发 libuv 退出断言，
+  // 直接 process.exit 会以异常码结束被测试闸门误判——留一拍让句柄收尾
+  setTimeout(() => process.exit(failed === 0 ? 0 : 1), 200);
 })().catch((err) => {
   console.error('测试执行异常:', err);
   process.exit(1);
