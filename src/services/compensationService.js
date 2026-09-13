@@ -153,9 +153,12 @@ async function placePending(options = {}) {
       stillQueued.push(o); // 下周还没生成，等生成排班表时优先安置
       continue;
     }
+    // rangeStart 不早于今天（2026-09-13）：目标周部分已过时（宕机恢复/写表失败重试），
+    // planInsertion 的并列候选含已过去的日子且按人名散列任选——会造出过去的脏班次
+    const rangeStart = o.weekStart < today ? today : o.weekStart;
     const plan = algo.planInsertion({
       weekStartStr: o.weekStart,
-      rangeStart: o.weekStart,
+      rangeStart,
       rangeEnd: weekEnd,
       memberName: o.name,
       assignments,
@@ -170,24 +173,20 @@ async function placePending(options = {}) {
       // 同步内存快照：同周后续义务（含加罚）不会重复落点
       if (!assignments.has(plan.dateStr)) assignments.set(plan.dateStr, []);
       assignments.get(plan.dateStr).push({ name: o.name, position: plan.position });
-      placedIds.push({ id: o.id, plan });
+      // 逐条即时标记 placed（2026-09-13）：写表成功但标记前中断会导致下次重复安置；
+      // 按 id 定向 mutate，不整包回写旧快照（避免覆盖并发状态变更）
+      state.mutate((st) => {
+        for (const o2 of st.obligations) {
+          if (o2.id === o.id) {
+            o2.placed = true;
+            o2.placedAt = new Date().toISOString();
+            o2.placedDate = plan.dateStr;
+            o2.placedPosition = plan.position;
+          }
+        }
+      });
     }
     placed.push({ ...o, plan });
-  }
-
-  // 义务标记按 id 定向 mutate，不整包回写旧快照（避免覆盖并发状态变更）
-  if (!dryRun && placedIds.length > 0) {
-    state.mutate((st) => {
-      for (const o of st.obligations) {
-        const m = placedIds.find((p) => p.id === o.id);
-        if (m) {
-          o.placed = true;
-          o.placedAt = new Date().toISOString();
-          o.placedDate = m.plan.dateStr;
-          o.placedPosition = m.plan.position;
-        }
-      }
-    });
   }
 
   return { placed, stillQueued, expired };

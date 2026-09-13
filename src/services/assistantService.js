@@ -46,16 +46,22 @@ function buildBoardCard(dateStr, records, yesterday) {
     || records.map((r) => r.dayStatus).find(Boolean)
     || null;
 
-  const lineFor = (rec, pos) => {
-    if (!rec) return `· ${pos}：（暂无排班）`;
+  // 按岗位聚合渲染（2026-09-13）：补位/补偿会产生同岗多人（4 人日），
+  // 旧 find 只取第一条会隐藏另一人（可能恰是实际顶班者）
+  const lineFor = (rec, pos, showPhoto) => {
     const statusText = rec.status || '待定';
-    const photoText = (rec.receiptCounts[pos] || 0) > 0 ? ` 📎${rec.receiptCounts[pos]}` : '';
+    const photoText = showPhoto && (rec.receiptCounts[pos] || 0) > 0 ? ` 📎${rec.receiptCounts[pos]}` : '';
     const unbound = rec.name ? '' : '（未绑定）';
     return `· ${pos}：${rec.name || '（未绑定）'} —— ${statusText}${photoText}${unbound}`;
   };
+  const linesForDay = (dayRecords) => ['总负责', '工位区', '装配区'].flatMap((pos) => {
+    const recs = dayRecords.filter((r) => r.position === pos);
+    if (!recs.length) return [`· ${pos}：（暂无排班）`];
+    // 照片挂在岗位栏（同人同岗共用），只在该岗位首行显示一次
+    return recs.map((r, i) => lineFor(r, pos, i === 0));
+  });
 
-  const lines = ['总负责', '工位区', '装配区'].map((pos) =>
-    lineFor(records.find((r) => r.position === pos), pos));
+  const lines = linesForDay(records);
 
   const elements = [
     { tag: 'markdown', content: `**📅 ${dateStr}**　总状态：${dayStatus || '未完成/待定'}` },
@@ -67,8 +73,7 @@ function buildBoardCard(dateStr, records, yesterday) {
     const yStatus = dutyTable.computeDayStatus(yesterday.records)
       || yesterday.records.map((r) => r.dayStatus).find(Boolean)
       || null;
-    const yLines = ['总负责', '工位区', '装配区'].map((pos) =>
-      lineFor(yesterday.records.find((r) => r.position === pos), pos));
+    const yLines = linesForDay(yesterday.records);
     elements.push(
       { tag: 'hr' },
       { tag: 'markdown', content: `**🕘 昨日（${yesterday.date}）战报**　总状态：${yStatus || '未完成'}` },

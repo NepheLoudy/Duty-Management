@@ -46,7 +46,10 @@ function load() {
       return { ...emptyState(), ...data };
     }
   } catch (err) {
-    console.warn('[状态] 读取状态文件失败（按空状态处理）:', err.message);
+    // 损坏文件保留现场（2026-09-13）：另存 .corrupt.bak 后再按空状态启动——
+    // 否则下次 mutate 会把空状态写回，排队中的补偿义务静默清零且不可恢复
+    try { fs.renameSync(filePath, filePath + '.corrupt.bak'); } catch { /* 忽略 */ }
+    console.error('[状态] 状态文件损坏，已另存 .corrupt.bak 并按空状态启动:', err.message);
   }
   return emptyState();
 }
@@ -54,7 +57,10 @@ function load() {
 function save(state) {
   const filePath = ensureWritableDir(statePath());
   try {
-    fs.writeFileSync(filePath, JSON.stringify(state, null, 2));
+    // 原子写（2026-09-13）：写临时文件后改名，写一半被杀不再产生半截 JSON
+    const tmp = filePath + '.tmp';
+    fs.writeFileSync(tmp, JSON.stringify(state, null, 2));
+    fs.renameSync(tmp, filePath);
   } catch (err) {
     console.error('[状态] 写状态文件失败（仅影响重启恢复）:', err.message);
   }

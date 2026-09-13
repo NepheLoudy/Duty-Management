@@ -175,6 +175,9 @@ function check(desc, cond, detail = '') {
   check('收口：会话已清空', Object.keys(state.load().sessions).length === 0);
   const obligations = state.load().obligations;
   check('收口：未做完成员补偿义务 2 条（队员B/队员C）', obligations.length === 2 && obligations.every((o) => ['队员B', '队员C'].includes(o.name)), JSON.stringify(obligations.map((o) => o.name)));
+  // 收口幂等（2026-09-13）：同日第二次真实收口不得重复登记补偿/虚增强罚
+  await inquiry.closeToday();
+  check('收口幂等：同日第二次收口补偿义务不重复', state.load().obligations.length === 2, JSON.stringify(state.load().obligations.map((o) => o.name)));
   const afterClose = await dutyTable.getRecordsByDate(today);
   check('收口：队员C 状态=未做完', afterClose.find((r) => r.name === '队员C').status === '未做完');
 
@@ -205,15 +208,22 @@ function check(desc, cond, detail = '') {
     const all = await dutyTable.getAllDayRecords();
     const dLeave = all.find((r) => r.name === '队员D' && r.status === '已请假');
     const sameDay = all.filter((r) => r.dateStr === dLeave.dateStr);
-    check('请假当日抽调补位：同岗新增 1 条记录（非请假人）',
-      sameDay.filter((r) => r.name !== '队员D' && r.position === dLeave.position).length >= 1,
-      JSON.stringify({ leaveDate: dLeave.dateStr, position: dLeave.position, sameDay: sameDay.map((r) => [r.name, r.position, r.status]) }));
-    check('请假回执说明补位安排', leave.reply.includes('补位'), leave.reply);
+    // 结局二选一（均合法）：有候选 → 同岗抽调 + 回执说明 + 私信告知；
+    // 全队已在班（4 人队 + 插入日）→ 无可抽调，回执说明空缺并交管理员
+    const coverRecs = sameDay.filter((r) => r.name !== '队员D' && r.position === dLeave.position);
+    const allBusy = roster.getQueue().filter((m) => m.name !== '队员D').every((m) => sameDay.some((r) => r.name === m.name));
+    check('请假当日补位：同岗抽调成功，或全队已在班无可抽调',
+      coverRecs.length >= 1 || allBusy,
+      JSON.stringify({ leaveDate: dLeave.dateStr, position: dLeave.position, sameDay: sameDay.map((r) => [r.name, r.position, r.status]), allBusy }));
+    check('请假回执说明补位安排或空缺兜底',
+      leave.reply.includes('补位安排') || leave.reply.includes('暂无可抽调人选'), leave.reply);
     const notice = memory.dmCalls.find((c) => c.text.includes('补位通知'));
     const coverName = notice ? (roster.getMembers().find((m) => m.openId === notice.openId) || {}).name : null;
-    check('被抽调人收到补位私信（且确为当日同岗补位者）',
-      Boolean(notice) && Boolean(coverName) && sameDay.some((r) => r.name === coverName && r.position === dLeave.position),
-      JSON.stringify({ matched: notice && notice.openId, coverName }));
+    check('被抽调人收到补位私信（且确为当日同岗补位者）；无候选时无私信',
+      coverRecs.length >= 1
+        ? (Boolean(notice) && Boolean(coverName) && sameDay.some((r) => r.name === coverName && r.position === dLeave.position))
+        : notice === undefined,
+      JSON.stringify({ matched: notice && notice.openId, coverName, allBusy }));
 
     // 目标周能否安置 D 的义务——快照必须取**对账前**：安置本身会占掉空位日，
     // 对账后再算会自相矛盾（该断言曾对真实日期敏感误报，2026-09-13 修正）

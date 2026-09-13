@@ -220,6 +220,19 @@ async function arrangeReplacement({ dateStr, position, excludeName }) {
   const picked = candidates[0];
   const member = roster.findByName(picked) || { name: picked };
   const recordIds = await dutyTable.createDayRecords(dateStr, [{ member, position }]);
+  // 当日补位：立即开监听会话（2026-09-13）——18:30 之后才被抽调的人没有询问会话，
+  // 不开会话则打卡/传照片都被拒，22:00 反被记「未做完」并背上补偿义务
+  if (member.openId && dateStr === todayStr()) {
+    state.mutate((st) => {
+      st.sessions[member.openId] = {
+        date: dateStr,
+        recordId: recordIds[0],
+        name: member.name,
+        position,
+        askedAt: new Date().toISOString(),
+      };
+    });
+  }
   console.log(`[补位] ${dateStr} ${position} 空缺，已抽调 ${picked}（远期班次 ${farthest.get(picked)}）补位`);
   return { name: picked, openId: member.openId || '', position, dateStr, recordIds };
 }

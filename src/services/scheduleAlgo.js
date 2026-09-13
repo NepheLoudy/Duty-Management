@@ -228,7 +228,9 @@ function generateSchedule({ members, startDateStr, days, history = [], insertion
       eligible = members.filter((m) => {
         if (hasDutyOn(m.name, date)) return false;
         const last = lastDuty.get(m.name);
-        if (last && diffDays(date, last) <= interval) return false;
+        // last < date 前置（2026-09-13）：补偿插入会把 lastDuty 设为未来日期，
+        // 负的 diffDays 恒 <= interval 会把该成员在插入日之前全部错误排除
+        if (last && last < date && diffDays(date, last) <= interval) return false;
         return true;
       });
       if (eligible.length >= 3 || interval === 0) break;

@@ -59,8 +59,13 @@ async function sendPrevDayRemind(options = {}) {
     if (dryRun) {
       sent.push({ name: member.name, position: rec.position, preview: text });
     } else {
-      await bot.sendTextToUser(member.openId, text);
-      sent.push({ name: member.name, position: rec.position });
+      try {
+        await bot.sendTextToUser(member.openId, text);
+        sent.push({ name: member.name, position: rec.position });
+      } catch (err) {
+        skipped.push({ name: member.name, reason: `提醒发送失败: ${err.message}` });
+        console.error(`[提醒] ${member.name} 发送失败:`, err.message);
+      }
     }
   }
 
@@ -101,17 +106,24 @@ async function askToday(options = {}) {
     if (dryRun) {
       asked.push({ name: member.name, position: rec.position, preview: text });
     } else {
-      await bot.sendTextToUser(member.openId, text);
-      state.mutate((s) => {
-        s.sessions[member.openId] = {
-          date,
-          recordId: rec.recordId,
-          name: member.name,
-          position: rec.position,
-          askedAt: new Date().toISOString(),
-        };
-      });
-      asked.push({ name: member.name, position: rec.position });
+      // 逐人异常隔离（2026-09-13）：单个成员发送失败（如 230013 不在应用可用范围）
+      // 不再中断整轮——剩余成员照常收到询问与会话
+      try {
+        await bot.sendTextToUser(member.openId, text);
+        state.mutate((s) => {
+          s.sessions[member.openId] = {
+            date,
+            recordId: rec.recordId,
+            name: member.name,
+            position: rec.position,
+            askedAt: new Date().toISOString(),
+          };
+        });
+        asked.push({ name: member.name, position: rec.position });
+      } catch (err) {
+        skipped.push({ name: member.name, reason: `询问发送失败: ${err.message}` });
+        console.error(`[询问] ${member.name} 发送失败:`, err.message);
+      }
     }
   }
 
@@ -228,7 +240,7 @@ async function closeToday(options = {}) {
       if (!dryRun) await dutyTable.setStatus(rec.recordId, status);
     }
     const photos = Object.values(rec.receiptCounts).some((n) => n > 0);
-    effective.push({ ...rec, status, photos });
+    effective.push({ ...rec, status, photos, markedNow: marked });
     results.push({ name: rec.name || '（未绑定）', position: rec.position, status, photos, markedNow: marked });
   }
 
@@ -241,7 +253,9 @@ async function closeToday(options = {}) {
   // 未做完 → 补偿插入义务（已请假在请假当时已登记，不重复）
   if (!dryRun) {
     for (const rec of effective) {
-      if (rec.status === config.status.MISS && rec.name) {
+      // 幂等守卫（2026-09-13）：只对本轮实际置「未做完」的记录登记补偿——
+      // 同日第二次收口（手动 test-close 默认真实执行 + cron）否则会双计义务并虚增连续缺勤
+      if (rec.status === config.status.MISS && rec.name && rec.markedNow) {
         compensation.handleAbsence(rec.name, date, config.status.MISS);
       }
     }
@@ -284,7 +298,20 @@ async function closeToday(options = {}) {
  * 连续排班/多条未完结时取最近一次，回执点名日期。
  * @param {{name: string}} member 已按 open_id 解析出的成员
  */
+// 请假链路全局串行（2026-09-13）：读全表→选候选→写补位记录是读改写链，
+// 并发请假（跨成员）会选中同一候选造成同日同岗双插——请假低频，全局链无性能影响
+let leaveChain = Promise.resolve();
+function withLeaveLock(fn) {
+  const task = leaveChain.then(fn, fn);
+  leaveChain = task.then(() => {}, () => {});
+  return task;
+}
+
 async function requestLeave(member) {
+  return withLeaveLock(() => requestLeaveLocked(member));
+}
+
+async function requestLeaveLocked(member) {
   const today = todayStr();
   const all = await dutyTable.getAllDayRecords();
   const rec = all.find((r) => r.name === member.name && r.dateStr >= today && !r.status);
