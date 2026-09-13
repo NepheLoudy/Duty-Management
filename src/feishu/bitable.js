@@ -55,7 +55,8 @@ async function batchCreateRecords(fieldsList) {
     const res = await requestAPI(
       'POST',
       `/bitable/v1/apps/${config.bitable.appToken}/tables/${config.bitable.tableId}/records/batch_create`,
-      { records: chunk.map((fields) => ({ fields })) }
+      // chunk 元素已是 {fields:{...}} 记录形状(2026-09-14 修复:原 map 再包一层导致 fields 双层,飞书报 FieldNameNotFound)
+      { records: chunk }
     );
     if (res.code !== 0) {
       throw new Error(`批量写入排班记录失败: ${res.msg} (code: ${res.code})`);

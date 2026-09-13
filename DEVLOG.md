@@ -217,3 +217,12 @@
 
 - 新增 src/auth.js（gateway 同款模板）：/api/duty/policy、/api/duty/whitelist、/api/duty/roster/refresh、/api/bot/test-* 写/触发端点需 X-API-Token（API_TOKEN 全局共享值，fail-closed）。运维台代理自动带头，手动 SSH curl 需自带。
 - push.js 加部署前测试闸门（R4）：五套 stub 全过才部署，SKIP_TESTS=1 可跳。
+
+### v22 · 2026-09-14 · 随本提交落地 · fix
+
+**修复批量写入双层包裹(排班生成首次全线打通) + push.js 适配部署目标迁移(小电脑)**
+
+- src/feishu/bitable.js `batchCreateRecords` 修复双层包裹:chunk 元素已是 `{fields}` 记录形状,原 `map((fields)=>({fields}))` 再包一层,实际发出 `{fields:{fields:{...}}}`,飞书报 FieldNameNotFound(1254045)——**值日表批量写入自上线以来从未成功过**(值日表一直为空的原因;stub 测试 mock 了 bitable,掩盖了线上故障)。修复后排班生成 90 条一次写入成功(2026-09-15~10-14,白名单 13 人生效,含 Siu/汪沛宇 排除)。
+- push.js 适配部署目标迁移:远端路径 /opt/duty-bot、/tmp、/home/qianli → /c/qianli/opt/duty-bot、/c/qianli、/c/home/qianli(git-bash 路径,SFTP 用 WIN 变体),随机器人整体迁移小电脑 DESKTOP-FE1MIGI(192.168.31.57)。
+- 排障全过程沉淀:新 skill `.agents/skills/qianli-lab-network/SKILL.md`(网络拓扑/断网排查/Windows 远程管理限制/ pm2 环境快照语义)。
+- 部署前五套 stub 测试全过。

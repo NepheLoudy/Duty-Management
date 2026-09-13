@@ -45,8 +45,10 @@ const commitMessage = process.argv[2] || 'update: 代码更新';
 const TAR_NAME = 'duty-bot-deploy.tar.gz';
 // 打包时用相对文件名 + cwd 指向临时目录，避免 Windows GNU tar 把 "C:" 当远程主机
 const TAR_LOCAL = path.join(os.tmpdir(), TAR_NAME);
-const TAR_REMOTE = '/tmp/' + TAR_NAME;
-const REMOTE_DIR = '/opt/duty-bot';
+const TAR_REMOTE = '/c/qianli/' + TAR_NAME;
+const TAR_REMOTE_WIN = 'C:/qianli/' + TAR_NAME;
+const REMOTE_DIR = '/c/qianli/opt/duty-bot';
+const REMOTE_DIR_WIN = 'C:/qianli/opt/duty-bot';
 const GIT_REMOTE = 'https://github.com/NepheLoudy/Duty-Management.git';
 const PM2_NAME = 'duty-bot';
 
@@ -56,7 +58,8 @@ const PM2_NAME = 'duty-bot';
 // 上传前先备份 NAS 现网版本；本地条目数少于现网时跳过上传（PUSH_FORCE_PRIVATE=1 强制覆盖）。
 // 事故记录：2026-09-12 v9 推送曾用本地空 whitelist.json 覆盖 NAS 18 人排除名单（不可恢复）。
 const PRIVATE_CONFIG_FILES = ['config/members.json', 'config/whitelist.json'];
-const DATA_DIR = '/home/qianli/duty-bot-data';
+const DATA_DIR = '/c/home/qianli/duty-bot-data';
+const DATA_DIR_WIN = 'C:/home/qianli/duty-bot-data';
 
 /** 估算配置里的条目数（数组字段长度求和；解析失败按内容字节数/100 估） */
 function countEntries(content) {
@@ -201,7 +204,7 @@ async function deployCode() {
         process.exit(1);
       }
       console.log('上传代码包到 NAS...');
-      sftp.fastPut(TAR_LOCAL, TAR_REMOTE, (err2) => {
+      sftp.fastPut(TAR_LOCAL, TAR_REMOTE_WIN, (err2) => {
         if (err2) {
           console.error('代码上传失败:', err2.message);
           conn.end();
@@ -219,7 +222,7 @@ async function deployCode() {
 // npm install
 function npmInstall() {
   console.log('\n安装依赖...');
-  exec('cd ' + REMOTE_DIR + ' && npm install --production', () => uploadEnv());
+  exec('export PATH=/c/tools/node-v22.10.0-win-x64:/c/Users/0d00/bin:/mingw64/bin:/usr/local/bin:/usr/bin:/bin:/mingw64/bin:/usr/bin:/c/Users/0d00/bin:/c/Windows/system32:/c/Windows:/c/Windows/System32/Wbem:/c/Windows/System32/WindowsPowerShell/v1.0:/c/Windows/System32/OpenSSH:/d/pcsuite:/c/MinGW/bin:/c/Program Files/dotnet:/c/Program Files/nodejs:/cmd:/c/Users/0d00/AppData/Local/Programs/Python/Python312/Scripts:/c/Users/0d00/AppData/Local/Programs/Python/Python312:/c/Users/0d00/AppData/Local/Programs/Python/Launcher:/c/Users/0d00/AppData/Local/Microsoft/WindowsApps:/c/Users/0d00/AppData/Local/Programs/Microsoft VS Code/bin:/c/Users/0d00/AppData/Roaming/npm:/c/Users/0d00/AppData/Local/Programs/ZCode/resources/tools/ripgrep:/c/Users/0d00/AppData/Local/Programs/ZCode/resources/tools/ugrep:/c/Program Files/nodejs:/usr/bin/vendor_perl:/usr/bin/core_perl; cd ' + REMOTE_DIR + ' && npm install --omit=dev', () => uploadEnv());
 }
 
 // ============ [3/4] 上传 .env 与私有配置 ============
@@ -243,7 +246,7 @@ function uploadEnv() {
     };
     // .env 是部署源头，直接传
     exec('true', () => {
-      sftp.fastPut(path.join(__dirname, envFile), REMOTE_DIR + '/' + envFile, (err2) => {
+      sftp.fastPut(path.join(__dirname, envFile), REMOTE_DIR_WIN + '/' + envFile, (err2) => {
         if (err2) {
           console.error('.env 上传失败:', err2.message);
           conn.end();
@@ -259,7 +262,7 @@ function uploadEnv() {
 // 私有配置保护上传：①NAS 现网有内容且与本地不同 → 先备份到项目外数据目录；
 // ②本地条目数少于现网 → 视为种子过期，跳过上传（PUSH_FORCE_PRIVATE=1 才覆盖）
 function guardUploadPrivate(sftp, f, done) {
-  const remotePath = REMOTE_DIR + '/' + f;
+  const remotePath = REMOTE_DIR_WIN + '/' + f;
   sftp.readFile(remotePath, 'utf8', (err, remoteContent) => {
     const localContent = fs.readFileSync(path.join(__dirname, f), 'utf8');
     const remoteCount = err ? 0 : countEntries(remoteContent);
@@ -283,7 +286,7 @@ function guardUploadPrivate(sftp, f, done) {
     const backupThen = (next) => {
       if (err || !remoteContent.trim() || remoteContent === localContent) return next();
       const ts = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
-      const backupPath = DATA_DIR + '/backup/' + f.replace(/\//g, '_') + '.' + ts + '.bak';
+      const backupPath = DATA_DIR_WIN + '/backup/' + f.replace(/\//g, '_') + '.' + ts + '.bak';
       return exec('mkdir -p ' + DATA_DIR + '/backup', () => {
         sftp.writeFile(backupPath, remoteContent, (err3) => {
           if (err3) console.warn(`⚠ ${f} 现网备份失败（继续上传）:`, err3.message);

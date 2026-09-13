@@ -105,7 +105,7 @@
 
 ## 配置
 
-`.env` 真值不进 git（本地 .env 是部署源头，push 时覆盖 NAS），键位清单见 `.env.example`：
+`.env` 真值不进 git（本地 .env 是部署源头，push 时覆盖部署目标；`NAS_*` 键为历史命名，现=小电脑 192.168.31.57:22），键位清单见 `.env.example`：
 共用应用凭据、表格 token、字段名映射、五个 cron 时刻、生成跨度/间隔、`DUTY_ADMIN_OPEN_IDS`
 （可选覆盖）、看板限流、看板 webhook 通道（`DUTY_BOARD_WEBHOOK_URL/SECRET`）、
 `DUTY_STATE_FILE`（**生产必须放项目目录之外**，SFTP 部署会清空
