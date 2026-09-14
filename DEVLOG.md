@@ -3,6 +3,7 @@
 > 版本隔离单位 = 一次 `npm run push`（即一次 git 提交 + 一次部署）。
 > 每次 push 完成后在文末追加：`## vN · YYYY-MM-DD · <提交哈希> · <类型>`，
 > 正文为提交说明原文 + 实际改动要点。vN 只增不复用，历史条目不改写。
+> 当前最新：**v23**（2026-09-15，随本提交落地）。
 
 
 
@@ -218,7 +219,7 @@
 - 新增 src/auth.js（gateway 同款模板）：/api/duty/policy、/api/duty/whitelist、/api/duty/roster/refresh、/api/bot/test-* 写/触发端点需 X-API-Token（API_TOKEN 全局共享值，fail-closed）。运维台代理自动带头，手动 SSH curl 需自带。
 - push.js 加部署前测试闸门（R4）：五套 stub 全过才部署，SKIP_TESTS=1 可跳。
 
-### v22 · 2026-09-14 · 随本提交落地 · fix
+### v22 · 2026-09-14 · fc83d23 · fix
 
 **修复批量写入双层包裹(排班生成首次全线打通) + push.js 适配部署目标迁移(小电脑)**
 
@@ -226,3 +227,13 @@
 - push.js 适配部署目标迁移:远端路径 /opt/duty-bot、/tmp、/home/qianli → /c/qianli/opt/duty-bot、/c/qianli、/c/home/qianli(git-bash 路径,SFTP 用 WIN 变体),随机器人整体迁移小电脑 DESKTOP-FE1MIGI(192.168.31.57)。
 - 排障全过程沉淀:新 skill `.agents/skills/qianli-lab-network/SKILL.md`(网络拓扑/断网排查/Windows 远程管理限制/ pm2 环境快照语义)。
 - 部署前五套 stub 测试全过。
+
+### v23 · 2026-09-15 · 随本提交落地 · fix
+
+**全项目深度审查修复批：push.js 守卫时序修复（数据保护关键）+ 路径显式化**
+
+- push.js 私有配置守卫时序修复：原实现 SFTP 分支先 `rm -rf` 清空远端目录（config/ 下名册/白名单/策略覆盖全被删）再读现网文件做守卫——现网永远是空，守卫条件永不触发、备份永远跳过，本地种子无条件覆盖，**正是 2026-09-12 v9 白名单覆盖事故的完整复现路径**（git 分支不受影响，SFTP 降级分支必踩，而 GitHub 不通在本环境常见）。改为连接后先盘点（读现网→备份→判定种子是否过期）再替换目录；本地种子过期时跳过覆盖并把现网内容显式回写；PRIVATE_CONFIG_FILES 增补 config/policy-override.json（管辖群在线改写此前不在保护清单，SFTP 替换即静默回退 env 值）。
+- restart 步骤补 PATH 导出：小电脑 SSH 非交互 shell 默认 PATH 无 node/pm2，原写法部署收尾三个 pm2 命令 127（代码已传服务未重启）。
+- .env 数据路径显式化：DUTY_STATE_FILE/QUIET_BACKLOG_FILE 由 /home/qianli/... 改 C:/home/qianli/...（Node on win32 对 POSIX 绝对路径按「进程 cwd 所在盘」解析，pm2 cwd 一旦换盘状态文件会静默漂移到新盘重建，会话/补偿义务/缺勤计数清零重开）。
+- DEVLOG 头部补建「当前最新」指针行（此前缺失，违反全局工程规则），v22 占位哈希回填 fc83d23。
+- 五套桩测试（schedule/flow/policy/board/roster）全过。
