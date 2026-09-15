@@ -191,6 +191,8 @@ function check(desc, cond, detail = '') {
   // 收口幂等（2026-09-13）：同日第二次真实收口不得重复登记补偿/虚增强罚
   await inquiry.closeToday();
   check('收口幂等：同日第二次收口补偿义务不重复', state.load().obligations.length === 2, JSON.stringify(state.load().obligations.map((o) => o.name)));
+  const secondClose = await inquiry.closeToday();
+  check('收口幂等：二次收口 missNotices 为空（私信不重发）', secondClose.notifications.missNotices.length === 0, JSON.stringify(secondClose.notifications.missNotices));
   const afterClose = await dutyTable.getRecordsByDate(today);
   check('收口：队员C 状态=未做完', afterClose.find((r) => r.name === '队员C').status === '未做完');
 

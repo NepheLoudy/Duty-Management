@@ -316,15 +316,16 @@ async function closeToday(options = {}) {
     .filter((r) => r.photos && r.status === config.status.MISS)
     .map((r) => ({ name: r.name, position: r.position, openId: (roster.findByName(r.name) || {}).openId || '' }));
   const missList = results.filter((r) => r.status === config.status.MISS);
+  const unnotified = results.filter((r) => r.status === config.status.MISS && r.name && !(roster.findByName(r.name) || {}).openId);
   // 未做完者本人私信通知（2026-09-16：此前只有管理员摘要，未做完者本人毫无感知）
   const missNotices = results
-    .filter((r) => r.status === config.status.MISS && r.name)
+    .filter((r) => r.status === config.status.MISS && r.name && r.markedNow)
     .map((r) => ({ name: r.name, position: r.position, photos: r.photos, openId: (roster.findByName(r.name) || {}).openId || '' }));
   const leaveList = results.filter((r) => r.status === config.status.LEAVE);
   const adminLines = [
     `🧹 值日收口（${date}）`,
     `- 当日总状态：${dayStatus || '未完成（保持为空）'}`,
-    `- 未做完 ${missList.length} 人${missList.length ? '：' + missList.map((r) => `${r.name}（${r.position}${r.photos ? '，有照片未答是' : ''}）`).join('、') : ''}`,
+    `- 未做完 ${missList.length} 人${missList.length ? '：' + missList.map((r) => `${r.name}（${r.position}${r.photos ? '，有照片未答是' : ''}${(roster.findByName(r.name) || {}).openId ? '' : '，未绑定未通知'}）`).join('、') : ''}`,
     `- 请假 ${leaveList.length} 人${leaveList.length ? '：' + leaveList.map((r) => `${r.name}（${r.position}）`).join('、') : ''}`,
     `- 补偿插入义务已登记（下周生效），00:30 对账核对安置`,
   ];

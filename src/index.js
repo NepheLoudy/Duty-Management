@@ -168,6 +168,15 @@ app.post('/api/bot/test-ask', requireApiToken, async (req, res) => {
   }
 });
 
+// 收口前临门提醒（手动触发不受静默限制；dryRun 只回预览）
+app.post('/api/bot/test-lastcall', requireApiToken, async (req, res) => {
+  try {
+    res.json({ success: true, result: await inquiry.sendLastCall({ dryRun: !!req.body?.dryRun }) });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 app.post('/api/bot/test-close', requireApiToken, async (req, res) => {
   try {
     // 手动触发不受静默限制（bypassQuiet：回执直接发送，不落积压）
