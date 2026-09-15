@@ -1,5 +1,5 @@
 /**
- * 统一部署脚本：一条命令完成「代码进 Git + 配置进 NAS + 部署」
+ * 统一部署脚本：一条命令完成「代码进 Git + 配置进部署目标 + 部署」
  * （复制 approval-bot 版，按 qianli-deploy 链路改四处：TAR_NAME / REMOTE_DIR / GIT_REMOTE / PM2_NAME）
  *
  * 用法：
@@ -9,7 +9,7 @@
  * 流程：
  *   [1/4] 代码提交推送到 GitHub（失败则标记，稍后改走 SFTP 直传）
  *   [2/4] 部署代码到 NAS（git push 成功走 git fetch，失败走 SFTP 打包直传）
- *   [3/4] 上传 .env 与真实名册/白名单到 NAS（含飞书密钥与成员信息，只单独进 NAS，绝不进 git）
+ *   [3/4] 上传 .env 与真实名册/白名单到部署目标（含飞书密钥与成员信息，只单独存部署目标，绝不进 git）
  *   [4/4] npm install + 重启服务
  *
  * NAS 连接配置从 .env 读取（NAS_HOST/NAS_PORT/NAS_USER/NAS_PASSWORD），脚本不存任何密钥。
@@ -53,7 +53,7 @@ const GIT_REMOTE = 'https://github.com/NepheLoudy/Duty-Management.git';
 const PM2_NAME = 'duty-bot';
 
 // 真实名册/白名单在 .gitignore 里（含成员姓名与 open_id，绝不进 git），
-// 但 NAS 运行必须有：走 git 路径部署时仓库里没有这两个文件，这里显式 SFTP 补齐。
+// 但部署目标运行必须有：走 git 路径部署时仓库里没有这两个文件，这里显式 SFTP 补齐。
 // 【运行时数据保护】这两份文件的权威编辑路径在 NAS 侧（运维台/定制窗口），本地只是种子：
 // 上传前先备份 NAS 现网版本；本地条目数少于现网时跳过上传（PUSH_FORCE_PRIVATE=1 强制覆盖）。
 // 事故记录：2026-09-12 v9 推送曾用本地空 whitelist.json 覆盖 NAS 18 人排除名单（不可恢复）。

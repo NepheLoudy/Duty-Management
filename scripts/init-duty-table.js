@@ -111,7 +111,7 @@ async function create() {
     console.log(`✓ 字段「${exp.field_name}」（${TYPE_NAMES[exp.type]}）`);
   }
 
-  console.log('\n===== 请把以下两行写进 .env（本地与 NAS 同源，勿提交 git）=====');
+  console.log('\n===== 请把以下两行写进 .env（本地与部署目标同源，勿提交 git）=====');
   console.log(`DUTY_BITABLE_APP_TOKEN=${appToken}`);
   console.log(`BITABLE_DUTY_TABLE_ID=${tableId}`);
   console.log('\n建好后可用 npm run table:check 复核，并确认应用已获得该表权限（把表添加给应用或建在应用可见的文件夹）。');

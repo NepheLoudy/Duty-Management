@@ -263,3 +263,10 @@
 - missNotices 加 markedNow 幂等守卫：同日手动 test-close + cron 双跑时，收口「未做完」私信不再重发（此前只拦补偿义务，私信会重发）。stub-test-flow 补二次收口断言。
 - 管理员收口摘要逐人标注「未绑定未通知」（此前未绑定者收不到私信且无处可见）。
 - 新增 POST /api/bot/test-lastcall（dryRun 同款，手动验证用）。
+
+### v27 · 2026-09-16 · 随本提交落地 · docs
+
+**NAS 残留清扫（docs，无行为变更）**
+
+- .env.example 部署段：旧 NAS 地址占位（10.x.x.x / qianli）→ 小电脑实际值（192.168.31.57 / mechax），注释对齐 wecom 版（NAS_ 为历史命名，语义=部署目标）。
+- push.js 头注释「配置进 NAS」等 3 处、init-duty-table 输出「本地与 NAS 同源」→ 部署目标口径。
