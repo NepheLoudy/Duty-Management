@@ -166,12 +166,25 @@ function check(desc, cond, detail = '') {
   const stranger = await inquiry.handleYes('ou_unknown');
   check('非值日队员回「是」→ 礼貌忽略', stranger.handled === false && stranger.reply.includes('值日助手'));
 
+  // ---- 3.5 21:00 临门提醒（2026-09-16） ----
+  const lastcallDry = await inquiry.sendLastCall({ dryRun: true });
+  check('临门提醒 dryRun：未完结 2 人（队员B/队员C）', lastcallDry.sent.length === 2, JSON.stringify(lastcallDry.sent.map((x) => x.name)));
+  check('临门提醒 dryRun：队员A 已完结不打扰', !lastcallDry.sent.some((x) => x.name === '队员A'));
+  await inquiry.sendLastCall();
+  check('临门提醒：私信 2 人且带收口倒计时指引', memory.dmCalls.filter((c) => c.text.includes('还剩约 1 小时')).length === 2);
+  check('临门提醒：队员B 已传照片 → 提示只需打卡', memory.dmCalls.some((c) => c.openId === 'ou_test_b' && c.text.includes('照片已收到')));
+  check('临门提醒：未传照片者引导照片+打卡', memory.dmCalls.some((c) => c.openId === 'ou_test_c' && c.text.includes('上传现场照片')));
+
   // ---- 4. 22:00 收口 ----
   const close = await inquiry.closeToday({ dryRun: true });
   check('收口 dryRun：队员B/C 判未做完', close.results.filter((r) => r.status === '未做完').length === 2);
   const closed = await inquiry.closeToday();
   check('收口：当日总状态为空（缺凭证/未全做完）', closed.dayStatus === null, String(closed.dayStatus));
   check('收口：photoOnly 名单含队员B', closed.notifications.photoOnly.some((p) => p.name === '队员B'));
+  check('收口：missNotices 覆盖全部未做完（B 有照片/C 无照片）', closed.notifications.missNotices.length === 2 && closed.notifications.missNotices.some((m) => m.name === '队员B' && m.photos) && closed.notifications.missNotices.some((m) => m.name === '队员C' && !m.photos), JSON.stringify(closed.notifications.missNotices));
+  await inquiry.sendCloseNotifications(closed.notifications);
+  const closeDm = memory.dmCalls.filter((c) => c.text.includes('已按「未做完」收口'));
+  check('收口：未做完者本人收到私信回执（含补偿与值日助手引导）', closeDm.length === 2 && closeDm.every((c) => c.text.includes('补偿值日') || c.text.includes('回复「打卡」')) && closeDm.some((c) => c.text.includes('值日助手')), JSON.stringify(closeDm.map((c) => c.text.slice(0, 40))));
   check('收口：会话已清空', Object.keys(state.load().sessions).length === 0);
   const obligations = state.load().obligations;
   check('收口：未做完成员补偿义务 2 条（队员B/队员C）', obligations.length === 2 && obligations.every((o) => ['队员B', '队员C'].includes(o.name)), JSON.stringify(obligations.map((o) => o.name)));

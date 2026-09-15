@@ -76,6 +76,8 @@ module.exports = {
   schedule: {
     prevRemind: process.env.DUTY_PREV_REMIND_SCHEDULE || '0 0 20 * * *',
     ask: process.env.DUTY_ASK_SCHEDULE || '0 30 18 * * *',
+    // 收口前 1 小时临门提醒（2026-09-16：询问后到收口无再触达，未做完主因之一）
+    lastCall: process.env.DUTY_LASTCALL_SCHEDULE || '0 0 21 * * *',
     deadline: process.env.DUTY_DEADLINE_SCHEDULE || '0 0 22 * * *',
     reconcile: process.env.DUTY_RECONCILE_SCHEDULE || '0 30 0 * * *',
     // 每日自动播报今日值日看板（群自定义机器人 webhook 通道，过静默闸门）

@@ -216,6 +216,49 @@ async function handleImage({ openId, imageKey, messageId }) {
 }
 
 /**
+ * D 日 21:00 临门提醒（收口前 1 小时）：私信当日仍未完结队员（可重扫任务，过静默闸门）。
+ * 2026-09-16 新增：18:30 询问后到 22:00 收口之间无任何再触达，成员忘了就是「未做完」。
+ * @returns {{date, sent: number, skipped: Array, preview: Array}}
+ */
+async function sendLastCall(options = {}) {
+  const dryRun = Boolean(options.dryRun);
+  const date = todayStr();
+  const recs = await dutyTable.getRecordsByDate(date);
+
+  const sent = [];
+  const skipped = [];
+  for (const rec of recs) {
+    if (rec.status) continue; // 已完结（做完/请假/未做完）不再打扰
+    const member = roster.findByName(rec.name);
+    if (!member || !member.openId) {
+      skipped.push({ name: rec.name || '（未绑定）', reason: '未绑定账号' });
+      continue;
+    }
+    const photos = Object.values(rec.receiptCounts).some((n) => n > 0);
+    const lines = [
+      `⏰ 提醒：今天（${date}）值日 22:00 收口，还剩约 1 小时——你的【${rec.position}】还没完成打卡。`,
+      photos
+        ? '照片已收到 ✅，回复「打卡」即完成值日。'
+        : '完成后回复「打卡」并上传现场照片（照片会写入值日表）。',
+      '确实做不完：回复「我要请假」，或 22:00 后记「未做完」（下周自动补偿一次）。查询排班发「值日助手」。',
+    ];
+    const text = lines.join('\n');
+    if (dryRun) {
+      sent.push({ name: member.name, position: rec.position, preview: text });
+      continue;
+    }
+    try {
+      await bot.sendTextToUser(member.openId, text);
+      sent.push({ name: member.name, position: rec.position });
+    } catch (err) {
+      skipped.push({ name: member.name, reason: `临门提醒发送失败: ${err.message}` });
+      console.error(`[临门提醒] ${member.name} 发送失败:`, err.message);
+    }
+  }
+  return { date, sent, skipped, preview: sent.map((s) => `${s.name}（${s.position}）`) };
+}
+
+/**
  * D 日 22:00 收口：
  * - 仍未回复「是」者置「未做完」（已传照片但没答「是」的同样置未做完）；
  * - 计算当日总状态（三个附件栏各有照片且全部已做完 → 今日完成值日）；
@@ -273,6 +316,10 @@ async function closeToday(options = {}) {
     .filter((r) => r.photos && r.status === config.status.MISS)
     .map((r) => ({ name: r.name, position: r.position, openId: (roster.findByName(r.name) || {}).openId || '' }));
   const missList = results.filter((r) => r.status === config.status.MISS);
+  // 未做完者本人私信通知（2026-09-16：此前只有管理员摘要，未做完者本人毫无感知）
+  const missNotices = results
+    .filter((r) => r.status === config.status.MISS && r.name)
+    .map((r) => ({ name: r.name, position: r.position, photos: r.photos, openId: (roster.findByName(r.name) || {}).openId || '' }));
   const leaveList = results.filter((r) => r.status === config.status.LEAVE);
   const adminLines = [
     `🧹 值日收口（${date}）`,
@@ -288,6 +335,7 @@ async function closeToday(options = {}) {
     dayStatus,
     notifications: {
       photoOnly,
+      missNotices,
       adminText: adminLines.join('\n'),
     },
   };
@@ -362,15 +410,15 @@ async function requestLeaveLocked(member) {
 
 /** 发送收口回执（cron 静默冲刷补发与手动触发共用） */
 async function sendCloseNotifications(notifications) {
-  for (const item of notifications.photoOnly || []) {
+  for (const item of notifications.missNotices || notifications.photoOnly || []) {
     if (!item.openId) continue;
+    const text = item.photos
+      ? '🧹 今天的值日已按「未做完」收口：你上传了照片但没有回复「打卡」。下次记得照片 + 回复「打卡」才算完成哦。'
+      : `🧹 今天的值日已按「未做完」收口（${item.position}）。下周会自动插入一次补偿值日，届时留意私信提醒；如有特殊情况请私信「值日助手」或联系管理员。`;
     try {
-      await bot.sendTextToUser(
-        item.openId,
-        '🧹 今天的值日已按「未做完」收口：你上传了照片但没有回复「打卡」。下次记得照片 + 回复「打卡」才算完成哦。'
-      );
+      await bot.sendTextToUser(item.openId, text);
     } catch (err) {
-      console.error(`[收口] 照片未答是回执发送失败（${item.name}）:`, err.message);
+      console.error(`[收口] 未做完私信发送失败（${item.name}）:`, err.message);
     }
   }
   for (const openId of roster.getAdminOpenIds()) {
@@ -385,6 +433,7 @@ async function sendCloseNotifications(notifications) {
 module.exports = {
   positionDutyText,
   sendPrevDayRemind,
+  sendLastCall,
   askToday,
   handleYes,
   handleNo,

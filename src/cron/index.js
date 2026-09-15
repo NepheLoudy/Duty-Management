@@ -10,6 +10,7 @@ const assistant = require('../services/assistantService');
 //   1. 次日提醒   DUTY_PREV_REMIND_SCHEDULE  (0 0 20 * * *,  D-1 20:00 私信明日队员)
 //   2. 当日询问   DUTY_ASK_SCHEDULE          (0 30 18 * * *, D 日 18:30 私信询问，开启监听窗口)
 //   3. 收口       DUTY_DEADLINE_SCHEDULE     (0 0 22 * * *,  D 日 22:00：置未做完/算总状态/生成补偿)
+//   3.5 临门提醒  DUTY_LASTCALL_SCHEDULE      (0 0 21 * * *,  D 日 21:00 私信未完结队员，收口前最后触达)
 //   4. 对账       DUTY_RECONCILE_SCHEDULE    (0 30 0 * * *,  每日 00:30 重算总状态/核对补偿义务)
 //   5. 看板播报   DUTY_BOARD_BROADCAST_SCHEDULE (0 0 12 * * *, 每日 12:00 webhook 推今日值日看板)
 //
@@ -42,12 +43,14 @@ function startCronJobs() {
   const quietTaskRunners = {
     duty_prev_remind: () => inquiry.sendPrevDayRemind(),
     duty_ask: () => inquiry.askToday(),
+    duty_lastcall: () => inquiry.sendLastCall(),
     duty_reconcile: () => compensation.reconcile(),
     duty_board_broadcast: () => assistant.broadcastTodayBoard(),
   };
 
   tasks.push(scheduleTask(config.schedule.prevRemind, 'duty_prev_remind', '次日值日提醒', quietTaskRunners.duty_prev_remind));
   tasks.push(scheduleTask(config.schedule.ask, 'duty_ask', '当日值日询问', quietTaskRunners.duty_ask));
+  tasks.push(scheduleTask(config.schedule.lastCall, 'duty_lastcall', '收口前临门提醒', quietTaskRunners.duty_lastcall));
   tasks.push(scheduleTask(config.schedule.reconcile, 'duty_reconcile', '值日对账', quietTaskRunners.duty_reconcile));
   tasks.push(scheduleTask(config.schedule.boardBroadcast, 'duty_board_broadcast', '看板自动播报', quietTaskRunners.duty_board_broadcast));
 
@@ -93,7 +96,7 @@ async function runClose(options = {}) {
 /** cron 状态（管理接口用） */
 function getCronStatus() {
   return {
-    running: tasks.length === 5,
+    running: tasks.length === 6,
     schedules: config.schedule,
     quietHours: quietHours.getStatus(),
   };

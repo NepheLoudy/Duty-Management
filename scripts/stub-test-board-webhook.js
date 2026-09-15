@@ -204,11 +204,12 @@ const server = http.createServer((req, res) => {
       flat(withoutY));
   }
 
-  server.close();
+  server.close(() => {
   console.log(failed === 0 ? `\n全部通过 ✅（临时目录 ${TMP}）` : `\n${failed} 项失败 ❌`);
-  process.exit(failed === 0 ? 0 : 1);
+  });
+  setTimeout(() => process.exit(failed === 0 ? 0 : 1), 1500).unref();
 })().catch((err) => {
   console.error('测试执行异常:', err);
-  server.close();
-  process.exit(1);
+  server.close(() => process.exit(1));
+  setTimeout(() => process.exit(1), 1500).unref();
 });
