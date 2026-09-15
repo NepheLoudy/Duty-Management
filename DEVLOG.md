@@ -237,3 +237,10 @@
 - .env 数据路径显式化：DUTY_STATE_FILE/QUIET_BACKLOG_FILE 由 /home/qianli/... 改 C:/home/qianli/...（Node on win32 对 POSIX 绝对路径按「进程 cwd 所在盘」解析，pm2 cwd 一旦换盘状态文件会静默漂移到新盘重建，会话/补偿义务/缺勤计数清零重开）。
 - DEVLOG 头部补建「当前最新」指针行（此前缺失，违反全局工程规则），v22 占位哈希回填 fc83d23。
 - 五套桩测试（schedule/flow/policy/board/roster）全过。
+
+### v24 · 2026-09-15 · 随本提交落地 · fix
+
+**R10 鉴权收尾（全项目审查推荐落地批）**
+
+- auth.js 废除 ?token= 查询串传参（R10②）：token 会进访问日志/代理日志，X-API-Token 头为唯一通道；工作区无 query token 消费方（运维台代理走头）。写端点鉴权本身 v22 已铺开，本批纯收口。
+- 注：本批部署因本机已随用户离站（校园网，家庭 LAN 不可达）暂缓，代码已推 GitHub，回站后 npm run push 补部署。
