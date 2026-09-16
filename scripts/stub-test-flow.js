@@ -1,6 +1,6 @@
 /**
  * M2 私信闭环干跑测试（stub：内存表格 + 捕获私信，不触网）
- * 覆盖：次日提醒/当日询问 → 是/否/照片写回 → 22:00 收口（未做完/总状态/补偿义务）
+ * 覆盖：次日提醒/当日询问 → 是/否/照片写回 → 收口（未做完/总状态/补偿义务）
  *      → 生成排班（插入优先安置）→ 请假 → 对账 → 值日助手指令路由/绑定/群看板限流。
  * 运行：npm run test:flow
  */
@@ -157,7 +157,7 @@ function check(desc, cond, detail = '') {
     memory.downloadCalls.length === 1 && memory.downloadCalls[0][0] === 'om_1' && memory.downloadCalls[0][1] === 'img_key_1',
     JSON.stringify(memory.downloadCalls));
   const noC = await inquiry.handleNo('ou_test_c');
-  check('队员C 回「否」→ 提示补救，不改状态', noC.handled && noC.reply.includes('22:00'));
+  check('队员C 回「否」→ 提示补救，不改状态', noC.handled && noC.reply.includes('收口前'));
 
   const recs = await dutyTable.getRecordsByDate(today);
   const recA = recs.find((r) => r.name === '队员A');
@@ -179,7 +179,7 @@ function check(desc, cond, detail = '') {
   check('临门提醒：队员B 已传照片 → 提示只需打卡', memory.dmCalls.some((c) => c.openId === 'ou_test_b' && c.text.includes('照片已收到')));
   check('临门提醒：未传照片者引导照片+打卡', memory.dmCalls.some((c) => c.openId === 'ou_test_c' && c.text.includes('上传现场照片')));
 
-  // ---- 4. 22:00 收口 ----
+  // ---- 4. 收口 ----
   const close = await inquiry.closeToday({ dryRun: true });
   check('收口 dryRun：队员B/C 判未做完', close.results.filter((r) => r.status === '未做完').length === 2);
   const closed = await inquiry.closeToday();

@@ -76,9 +76,11 @@ module.exports = {
   schedule: {
     prevRemind: process.env.DUTY_PREV_REMIND_SCHEDULE || '0 0 20 * * *',
     ask: process.env.DUTY_ASK_SCHEDULE || '0 30 18 * * *',
-    // 收口前 1 小时临门提醒（2026-09-16：询问后到收口无再触达，未做完主因之一）
-    lastCall: process.env.DUTY_LASTCALL_SCHEDULE || '0 0 21 * * *',
-    deadline: process.env.DUTY_DEADLINE_SCHEDULE || '0 0 22 * * *',
+    // 收口前 1 小时临门提醒（2026-09-16 新增；2026-09-17 随收口推迟到 23:00）
+    lastCall: process.env.DUTY_LASTCALL_SCHEDULE || '0 0 23 * * *',
+    // 24:00（午夜）收口（2026-09-17 用户口径：大家下班晚，原 22:00 提前）。
+    // 注意：0 点已跨日，cron 收口归属前一天（见 cron deadline runner 的 dateStr 处理）
+    deadline: process.env.DUTY_DEADLINE_SCHEDULE || '0 0 0 * * *',
     reconcile: process.env.DUTY_RECONCILE_SCHEDULE || '0 30 0 * * *',
     // 每日自动播报今日值日看板（群自定义机器人 webhook 通道，过静默闸门）
     boardBroadcast: process.env.DUTY_BOARD_BROADCAST_SCHEDULE || '0 0 12 * * *',

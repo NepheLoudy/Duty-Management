@@ -10,8 +10,9 @@ const express = require('../services/expressService');
 // 定时任务（node-cron 6 段式 + Asia/Shanghai）：
 //   1. 次日提醒   DUTY_PREV_REMIND_SCHEDULE  (0 0 20 * * *,  D-1 20:00 私信明日队员)
 //   2. 当日询问   DUTY_ASK_SCHEDULE          (0 30 18 * * *, D 日 18:30 私信询问，开启监听窗口)
-//   3. 收口       DUTY_DEADLINE_SCHEDULE     (0 0 22 * * *,  D 日 22:00：置未做完/算总状态/生成补偿)
-//   3.5 临门提醒  DUTY_LASTCALL_SCHEDULE      (0 0 21 * * *,  D 日 21:00 私信未完结队员，收口前最后触达)
+//   3. 收口       DUTY_DEADLINE_SCHEDULE     (0 0 0 * * *,   D 日 24:00（午夜）：置未做完/算总状态/生成补偿；
+//                                                 0 点已跨日，归属日期由 deadline runner 显式指定为 D 日)
+//   3.5 临门提醒  DUTY_LASTCALL_SCHEDULE      (0 0 23 * * *,  D 日 23:00 私信未完结队员，收口前最后触达)
 //   4. 对账       DUTY_RECONCILE_SCHEDULE    (0 30 0 * * *,  每日 00:30 重算总状态/核对补偿义务)
 //   5. 看板播报   DUTY_BOARD_BROADCAST_SCHEDULE (0 0 12 * * *, 每日 12:00 webhook 推今日值日看板)
 //
@@ -59,10 +60,14 @@ function startCronJobs() {
   // 冲刷补发时以补发时刻最新数据重查——夜间已被取完的不再播）
   tasks.push(scheduleTask(config.express.broadcastSchedule, 'duty_express_broadcast', '快递未取播报', quietTaskRunners.duty_express_broadcast));
 
-  // 收口：写表动作不延迟（不进 gateTask），仅通知载荷过闸门
+  // 收口：写表动作不延迟（不进 gateTask），仅通知载荷过闸门。
+  // 24:00（0 点）收口已跨日：closeToday 默认取「今天」会落空——按上海时间回退
+  // 30 分钟计算归属日期（0:00-0:30 窗口内=前一天 D 日；若手动把收口改到白天则=当天，不影响）
   const deadlineTask = cron.schedule(config.schedule.deadline, () => {
     console.log('[定时任务] 触发值日收口');
-    runClose()
+    const shifted = new Date(Date.now() + 8 * 60 * 60 * 1000 - 30 * 60 * 1000);
+    const dutyDate = shifted.toISOString().slice(0, 10);
+    runClose({ dateStr: dutyDate })
       .catch((err) => console.error('[定时任务] 值日收口失败:', err.message));
   }, { timezone: 'Asia/Shanghai' });
   tasks.push(deadlineTask);

@@ -12,11 +12,11 @@ const plaza = require('./plaza');
 
 // ============================================================
 // 私信闭环：D-1 提醒 → 当日询问（18:30，开启监听会话）→ 是/否/照片写回
-// → 22:00 收口（未回复置未做完、算当日总状态、生成补偿插入）→ 请假
+// → 24:00（午夜）收口（未回复置未做完、算当日总状态、生成补偿插入）→ 请假
 //
 // 监听对象仅限当日 3 名值日队员（按 open_id 匹配当日记录；未绑定成员
 // 跳过私信、看板标注「未绑定」）。「是」与照片独立生效：照片先到先挂
-// 对应岗位附件栏，「是」到了才置已做完（22:00 前均监听）。
+// 对应岗位附件栏，「是」到了才置已做完（收口前均监听）。
 // 收口的写表动作不延迟（晚间静默语义），只有回执通知由调用方过闸门。
 // ============================================================
 
@@ -95,7 +95,7 @@ async function askToday(options = {}) {
       `职责：${positionDutyText(rec.position)}`,
       '',
       '完成后请回复「打卡」完成值日打卡，并上传现场照片（照片会写入值日表对应岗位栏）。',
-      '22:00 统一收口，未打卡会记为「未做完」；想请假回复「我要请假」。',
+      '24:00（午夜）统一收口，未打卡会记为「未做完」；想请假回复「我要请假」。',
     ];
     // 有未过期的 DDL 逾期确认时加冲突提示（2026-09-13 口径：值日打卡用「打卡」，
     // 回复「是」会确认 DDL 项目而非打卡；hub 查不到时静默降级不加提示）
@@ -146,7 +146,7 @@ async function sessionRecord(openId) {
   return { session, rec, member };
 }
 
-/** 队员回「是」：完成状态 → 已做完（照片仍可在 22:00 前补传） */
+/** 队员回「是」：完成状态 → 已做完（照片仍可在收口前补传） */
 async function handleYes(openId) {
   const { session, rec, member } = await sessionRecord(openId);
   if (!session || !rec) {
@@ -156,7 +156,7 @@ async function handleYes(openId) {
     return { handled: true, reply: '你今天的值日已登记请假，无需再确认。' };
   }
   if (rec.status === config.status.DONE) {
-    return { handled: true, reply: '✅ 你今天的值日此前已记录完成，记得把现场照片发我（22:00 前均可）。' };
+    return { handled: true, reply: '✅ 你今天的值日此前已记录完成，记得把现场照片发我（收口前均可）。' };
   }
   await dutyTable.setStatus(rec.recordId, config.status.DONE);
   compensation.resetStreak(session.name);
@@ -166,11 +166,11 @@ async function handleYes(openId) {
     handled: true,
     reply: photos > 0
       ? '✅ 已记录今日值日完成（照片已收到）。辛苦了！'
-      : '✅ 已记录今日值日完成。记得把现场照片发我（会写入值日表对应岗位栏），22:00 前均可补传。',
+      : '✅ 已记录今日值日完成。记得把现场照片发我（会写入值日表对应岗位栏），收口前均可补传。',
   };
 }
 
-/** 队员回「否」：不改状态（22:00 收口置未做完），回执提醒可补救 */
+/** 队员回「否」：不改状态（收口置未做完），回执提醒可补救 */
 async function handleNo(openId) {
   const { session, rec } = await sessionRecord(openId);
   if (!session || !rec) {
@@ -178,7 +178,7 @@ async function handleNo(openId) {
   }
   return {
     handled: true,
-    reply: '收到。22:00 收口前你仍可以：补传现场照片 + 回复「打卡」完成打卡；或回复「我要请假」登记请假。',
+    reply: '收到。24:00（午夜）收口前你仍可以：补传现场照片 + 回复「打卡」完成打卡；或回复「我要请假」登记请假。',
   };
 }
 
@@ -211,13 +211,13 @@ async function handleImage({ openId, imageKey, messageId }) {
   return {
     handled: true,
     reply: `📸 已收到第 ${count} 张照片，写入「${session.position}」凭证栏。`
-      + (doneMarked ? '今日值日已完成，辛苦了！' : '完成后记得回复「打卡」，22:00 前有效。'),
+      + (doneMarked ? '今日值日已完成，辛苦了！' : '完成后记得回复「打卡」，收口（24:00）前有效。'),
   };
 }
 
 /**
  * D 日 21:00 临门提醒（收口前 1 小时）：私信当日仍未完结队员（可重扫任务，过静默闸门）。
- * 2026-09-16 新增：18:30 询问后到 22:00 收口之间无任何再触达，成员忘了就是「未做完」。
+ * 2026-09-16 新增：18:30 询问后到收口之间无任何再触达，成员忘了就是「未做完」。
  * @returns {{date, sent: number, skipped: Array, preview: Array}}
  */
 async function sendLastCall(options = {}) {
@@ -236,11 +236,11 @@ async function sendLastCall(options = {}) {
     }
     const photos = Object.values(rec.receiptCounts).some((n) => n > 0);
     const lines = [
-      `⏰ 提醒：今天（${date}）值日 22:00 收口，还剩约 1 小时——你的【${rec.position}】还没完成打卡。`,
+      `⏰ 提醒：今天（${date}）值日 24:00（午夜）收口，还剩约 1 小时——你的【${rec.position}】还没完成打卡。`,
       photos
         ? '照片已收到 ✅，回复「打卡」即完成值日。'
         : '完成后回复「打卡」并上传现场照片（照片会写入值日表）。',
-      '确实做不完：回复「我要请假」，或 22:00 后记「未做完」（下周自动补偿一次）。查询排班发「值日助手」。',
+      '确实做不完：回复「我要请假」，或收口后记「未做完」（下周自动补偿一次）。查询排班发「值日助手」。',
     ];
     const text = lines.join('\n');
     if (dryRun) {
@@ -259,7 +259,7 @@ async function sendLastCall(options = {}) {
 }
 
 /**
- * D 日 22:00 收口：
+ * D 日 24:00（午夜）收口：
  * - 仍未回复「是」者置「未做完」（已传照片但没答「是」的同样置未做完）；
  * - 计算当日总状态（三个附件栏各有照片且全部已做完 → 今日完成值日）；
  * - 未做完成员生成下周补偿插入义务（已请假者在请假当时已生成）；
@@ -269,7 +269,9 @@ async function sendLastCall(options = {}) {
  */
 async function closeToday(options = {}) {
   const dryRun = Boolean(options.dryRun);
-  const date = todayStr();
+  // 24:00（0 点）收口跨日：调用方（cron deadline runner）显式传归属日期（=值日当天 D 日）；
+  // 手动 test-close 不传时取「今天」
+  const date = options.dateStr || todayStr();
   const recs = await dutyTable.getRecordsByDate(date);
 
   const results = [];
@@ -389,7 +391,7 @@ async function requestLeaveLocked(member) {
       await bot.sendTextToUser(
         replacement.openId,
         `🧹 补位通知：${rec.dateStr}（${rec.position}）的值日因 ${member.name} 请假，已安排你补位。\n`
-        + '完成后请照常私信回复「打卡」并上传照片，22:00 前完成即可。谢谢你！',
+        + '完成后请照常私信回复「打卡」并上传照片，收口（24:00）前完成即可。谢谢你！',
       );
     } catch (err) {
       console.error(`[补位] 通知 ${replacement.name} 失败:`, err.message);
