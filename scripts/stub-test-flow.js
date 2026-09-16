@@ -42,7 +42,7 @@ require.cache[require.resolve('../src/feishu/contacts')] = {
     return (raw.members || []).map((m) => ({ name: m.name, openId: m.openId || '', departments: '测试组' }));
   } },
 };
-const memory = { records: [], seq: 1, dmCalls: [], cards: [], fileTokens: [] };
+const memory = { records: [], seq: 1, dmCalls: [], cards: [], fileTokens: [], downloadCalls: [] };
 
 require.cache[require.resolve('../src/feishu/bitable')] = {
   id: 'bitable-stub', filename: 'bitable-stub', loaded: true, exports: {
@@ -76,7 +76,8 @@ require.cache[require.resolve('../src/feishu/bot')] = {
 
 require.cache[require.resolve('../src/feishu/client')] = {
   id: 'client-stub', filename: 'client-stub', loaded: true, exports: {
-    async downloadImage() { return Buffer.from('fake-image'); },
+    // 记录入参：downloadImage(messageId, imageKey)——2026-09-16 换消息资源接口，messageId 必传
+    async downloadImage(...args) { memory.downloadCalls.push(args); return Buffer.from('fake-image'); },
     async uploadMediaToBitable(buf, fileName) {
       const token = `file_${memory.seq++}`;
       memory.fileTokens.push({ token, fileName });
@@ -152,6 +153,9 @@ function check(desc, cond, detail = '') {
   check('队员A 再回「是」→ 兼容保留（仍被值日分支接管）', yesCompat.handled === true, JSON.stringify(yesCompat));
   const imgB = await inquiry.handleImage({ openId: 'ou_test_b', imageKey: 'img_key_1', messageId: 'om_1' });
   check('队员B 传照片 → 回执第 1 张', imgB.handled && imgB.reply.includes('第 1 张'), imgB.reply);
+  check('照片下载走消息资源接口：downloadImage 收到 (messageId, imageKey)',
+    memory.downloadCalls.length === 1 && memory.downloadCalls[0][0] === 'om_1' && memory.downloadCalls[0][1] === 'img_key_1',
+    JSON.stringify(memory.downloadCalls));
   const noC = await inquiry.handleNo('ou_test_c');
   check('队员C 回「否」→ 提示补救，不改状态', noC.handled && noC.reply.includes('22:00'));
 

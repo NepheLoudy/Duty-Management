@@ -68,16 +68,24 @@ async function requestAPI(method, path, body) {
 }
 
 /**
- * 下载 IM 消息图片（二进制）。需应用开通 im:image（获取图片）权限。
- * IM 消息的 image_key 不能直接作多维表格附件 file_token，必须下载后重新上传。
+ * 下载 IM 消息图片（二进制）。需应用开通「获取消息中的资源文件」权限。
+ * 用户发送的图片不能用 GET /im/v1/images/{image_key}（该接口只能下载机器人
+ * 自己上传的图片，飞书对用户图片报 234001），必须走消息资源接口：
+ * GET /im/v1/messages/{message_id}/resources/{file_key}?type=image
  */
-async function downloadImage(imageKey) {
+async function downloadImage(messageId, imageKey) {
+  if (!messageId) {
+    throw new Error('下载图片失败: 缺少 message_id（消息资源接口必填）');
+  }
   const token = await getTenantAccessToken();
-  const res = await fetch(`${BASE_URL}/im/v1/images/${encodeURIComponent(imageKey)}`, {
-    method: 'GET',
-    signal: AbortSignal.timeout(30000),
-    headers: { 'Authorization': `Bearer ${token}` },
-  });
+  const res = await fetch(
+    `${BASE_URL}/im/v1/messages/${encodeURIComponent(messageId)}/resources/${encodeURIComponent(imageKey)}?type=image`,
+    {
+      method: 'GET',
+      signal: AbortSignal.timeout(30000),
+      headers: { 'Authorization': `Bearer ${token}` },
+    }
+  );
 
   const contentType = res.headers.get('content-type') || '';
   if (!res.ok || contentType.includes('application/json')) {

@@ -203,7 +203,7 @@ async function handleImage({ openId, imageKey, messageId }) {
     return { handled: false, reply: '今天没有进行中的值日确认，照片暂不收集。发「值日助手」可查询你的排班。' };
   }
 
-  const buf = await client.downloadImage(imageKey);
+  const buf = await client.downloadImage(messageId, imageKey);
   const fileName = `duty_${session.date}_${session.position}_${session.name}_${(messageId || Date.now()).toString().slice(-8)}.jpg`;
   const fileToken = await client.uploadMediaToBitable(buf, fileName);
   const count = await dutyTable.appendReceipt(rec.recordId, session.position, fileToken);
