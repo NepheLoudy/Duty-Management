@@ -62,8 +62,12 @@ function check(desc, cond, detail = '') {
     p.hubEnforcement.groupBoardCommand === '值日助手'
     && p.hubEnforcement.closeBasicCommands === true
     && typeof p.hubEnforcement.fallbackGuidance === 'string' && p.hubEnforcement.fallbackGuidance.includes('值日助手'));
-  check('策略：p2p 指令清单 8 核心词（含打卡/打卡了）+8 打卡口语变体（裸词）+8 斜杠别名 + 绑定前缀',
-    p.p2pCommands.length === 24
+  check('策略：p2p 指令清单 8 核心词（含打卡/打卡了）+8 打卡口语变体 +8 斜杠别名 +快递助手 5 词 +取件词形 + 绑定前缀',
+    p.p2pCommands.length === 32
+    && ['快递助手', '快递', '查询当前快递', '已取', '全部已取', '/快递助手', '/快递', '/查询当前快递'].every((w) => p.p2pCommands.includes(w))
+    && Array.isArray(p.p2pCommandPatterns) && p.p2pCommandPatterns.includes('^已取\\s*\\d*$')
+    && Array.isArray(p.groupCommands) && p.groupCommands.includes('快递') && p.groupCommands.includes('值日助手')
+    && p.express && p.express.enabled === true
     && ['打卡', '打卡了', '/打卡', '/打卡了'].every((w) => p.p2pCommands.includes(w))
     && ['是的', '好', '好了', '完成', '完成了', '做完了', '搞定', '搞定了'].every((w) => p.p2pCommands.includes(w))
     && JSON.stringify(p.p2pCommandPrefixes) === JSON.stringify(['绑定', '/绑定']),

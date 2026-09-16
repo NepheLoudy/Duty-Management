@@ -28,7 +28,7 @@ function runTestGate() {
     return true;
   }
   const { spawnSync } = require('child_process');
-  const cmd = 'npm run test:schedule && npm run test:flow && npm run test:policy && npm run test:board && npm run test:roster';
+  const cmd = 'npm run test:schedule && npm run test:flow && npm run test:policy && npm run test:board && npm run test:roster && npm run test:express';
   if (!cmd) { console.log('[测试闸门] 无测试命令，跳过'); return true; }
   console.log('[测试闸门] 运行:', cmd);
   const r = spawnSync(cmd, { shell: true, stdio: 'inherit', cwd: __dirname });

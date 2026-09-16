@@ -34,8 +34,24 @@ const settings = {
 };
 
 function clampHour(raw, fallback) {
-  const n = Number(raw);
-  if (!Number.isFinite(n)) return fallback;
+  if (raw === undefined || raw === null || raw === '') return fallback;
+  const s = String(raw).trim();
+  // 兼容「HH:mm」格式（wecom-attendance 同名键口径）与纯小时数字：
+  // 本模块粒度为整小时，分钟非 0 时取整点并 warn
+  if (s.includes(':')) {
+    const [h, m] = s.split(':').map((x) => Number(x));
+    if (Number.isFinite(h) && Number.isFinite(m)) {
+      if (m !== 0) console.warn(`[静默] QUIET_HOURS 含分钟（${s}），按整点 ${Math.trunc(h)} 处理`);
+      return Math.min(23, Math.max(0, Math.trunc(h)));
+    }
+    console.warn(`[静默] QUIET_HOURS 无法解析（${s}），使用默认 ${fallback}`);
+    return fallback;
+  }
+  const n = Number(s);
+  if (!Number.isFinite(n)) {
+    console.warn(`[静默] QUIET_HOURS 无法解析（${s}），使用默认 ${fallback}`);
+    return fallback;
+  }
   return Math.min(23, Math.max(0, Math.trunc(n)));
 }
 

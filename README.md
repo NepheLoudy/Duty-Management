@@ -78,6 +78,7 @@
 | D 日 21:00 | 收口前临门提醒 | 私信当日仍未完结队员（还剩约 1 小时；已传照片者提示只需打卡）；2026-09-16 新增——询问后到收口无再触达是未做完主因 |
 | D 日 22:00 | 收口 | 未「打卡」置未做完（只传照片没打卡同样置未做完并回执提示）；算当日总状态；生成补偿义务。**写表动作不延迟**，仅回执通知过闸门 |
 | 每日 00:30 | 对账 | 重算昨日总状态（兼容手工改表）、核对补偿插入义务、回执管理员 |
+| 每小时整点 | 快递未取播报 | 「快递」表当前未取清单（取件码+编号）发快递群（`EXPRESS_BROADCAST_SCHEDULE`，2026-09-17 快递助手）；无未取跳过不发 |
 | 每日 12:00 | 看板自动播报 | 值日看板卡片（**今日三岗 + 昨日战报，一个面板同时播昨天今天**）经群自定义机器人 webhook 推到值日播报群；未配置 webhook 或推送失败时回退应用身份直发管辖群（两者都不可用才跳过）；无排班记录跳过 |
 
 晚间静默窗口（默认 02:00–09:00）内：提醒/询问/对账登记积压、09:00 整点以最新数据重跑；
@@ -94,12 +95,29 @@
   卡片经群自定义机器人 webhook 发送（`DUTY_BOARD_WEBHOOK_URL`，可选
   `DUTY_BOARD_WEBHOOK_SECRET` 签名），限流/管辖按来源群 chatId 计；未配置时回退应用身份直发。
 
+## 快递助手（2026-09-17 新增，快递申领群专属，仅群 @ 与私聊触发）
+
+- `快递`（带不带 `/` 均可，群 @ 或私聊）：开启 **5 分钟登记窗口**并群发引导——窗口内群里
+  直接发「取件码」文字（可跟一张快递照片），逐条登记进「机器人项目看板」base 的**「快递」表**
+  （发起人=消息发送者、快递内容=照片、取件码、是否取件=未取由机器人填写；表结构用户手工建，
+  `create-plaza-tables.js` 幂等补 登记时间/取件时间/消息ID 三列）。窗口结束群发登记摘要并现场编号。
+- 窗口内非@消息由 **hub 观察转发**（`maybeForwardExpressObserve` → `POST /api/chat/command`
+  `type:'express_observe'`）收集——duty-bot 仍不消费消息事件；无窗口时静默忽略，零噪音。
+- `查询当前快递`：当前未取清单与编号（查询即刷新编号，按登记顺序 1..N）。
+- 取件确认（群 @ 或私聊）：`已取n`（多件必须带编号，按最后一次播报/查询的编号快照对账，
+  两次播报之间编号稳定）、`已取`（仅一件时生效）、`全部已取`；确认后回写「是否取件=已取 + 取件时间」，
+  下次播报自动重排编号。
+- 每小时整点自动播报未取清单（过晚间静默闸门，冲刷以补发时刻最新数据重查；无未取不发）。
+- 配置：`EXPRESS_GROUP_CHAT_IDS`（留空回落值日管辖群）/ `EXPRESS_WINDOW_MINUTES`（默认 5）/
+  `EXPRESS_BROADCAST_SCHEDULE` / `EXPRESS_TABLE_ID`（默认已内置）/ `EXPRESS_ENABLED`。
+- 桩测试：`scripts/stub-test-express.js`（29 项：窗口/登记/配对/去重/编号/取件/播报）。
+
 ## API
 
 | 方法 | 路径 | 说明 |
 | --- | --- | --- |
 | GET | `/api/health` | 健康检查（含静默窗口状态） |
-| POST | `/api/chat/command` | hub 指令转发：`{command, openId, chatType, chatId?, messageId?, args?}`；图片 `{type:'image', openId, imageKey, messageId}`；返回 `{reply, handled}`，reply 空串=已自行处理（群看板卡片）或未接管（无会话口语变体，hub 落回常规流程） |
+| POST | `/api/chat/command` | hub 指令转发：`{command, openId, chatType, chatId?, messageId?, args?}`；图片 `{type:'image', openId, imageKey, messageId}`；返回 `{reply}`，reply 空串=已自行处理（群看板卡片）或未接管（无会话口语变体，hub 落回常规流程） |
 | GET | `/api/duty/brief` | 昨日结果+今日名单一次取齐（M4 已由看板卡自身实现；本接口保留为通用数据接口） |
 | POST | `/api/bot/test-remind` / `test-ask` / `test-close` / `test-reconcile` / `test-generate` / `test-board` | 手动触发（body `{"dryRun":true}` 只预览不发送/不落表） |
 | GET | `/api/bot/cron-status` | 定时任务与静默状态 |

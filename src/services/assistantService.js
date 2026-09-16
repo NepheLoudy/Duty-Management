@@ -8,6 +8,7 @@ const dutyTable = require('./dutyTableService');
 const scheduleService = require('./scheduleService');
 const inquiry = require('./inquiryService');
 const policy = require('./policyService');
+const express = require('./expressService');
 
 // ============================================================
 // 值日助手（经 hub 转发的被动指令层，POST /api/chat/command）
@@ -202,6 +203,9 @@ async function handleCommand(payload = {}) {
     if (raw === (policy.getPolicy().hubEnforcement.groupBoardCommand || '值日助手')) {
       return handleGroupBoard(payload.chatId);
     }
+    // 快递助手指令 / 取件确认（2026-09-17）：仅快递群（=值日管辖群）@ 触发
+    const expressResult = await express.handleCommand(raw, { chatType: 'group', chatId: payload.chatId, openId });
+    if (expressResult.handled) return expressResult;
     return { handled: false, reply: '' };
   }
 
@@ -276,11 +280,19 @@ async function handleCommand(payload = {}) {
     return { handled: true, reply: result.message };
   }
 
+  // 快递助手（2026-09-17）：私聊同样可用（仅快递群指令 + 私聊触发的口径）
+  const expressResult = await express.handleCommand(raw, { chatType: 'p2p', openId });
+  if (expressResult.handled) return expressResult;
+
   return { handled: false, reply: `未识别指令「${raw}」。\n${HELP_TEXT}` };
 }
 
-/** 图片载荷入口（hub 转发：{type:'image', openId, imageKey, messageId}） */
+/** 图片载荷入口（hub 转发：{type:'image', openId, imageKey, messageId}）
+ *  p2p = 值日照片凭证；group = 快递登记窗口图片（无窗口静默忽略） */
 async function handleImagePayload(payload = {}) {
+  if (payload.chatType === 'group') {
+    return express.handleImagePayload(payload);
+  }
   try {
     return await inquiry.handleImage(payload);
   } catch (err) {

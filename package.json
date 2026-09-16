@@ -14,7 +14,8 @@
     "table:create": "node scripts/init-duty-table.js --create",
     "test:policy": "node scripts/stub-test-policy.js",
     "test:roster": "node scripts/stub-test-roster.js",
-    "test:board": "node scripts/stub-test-board-webhook.js"
+    "test:board": "node scripts/stub-test-board-webhook.js",
+    "test:express": "node scripts/stub-test-express.js"
   },
   "keywords": [
     "feishu",

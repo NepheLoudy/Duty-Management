@@ -9,7 +9,7 @@ const state = require('./stateStore');
 // 排班生成与对外数据
 // - generate：表格中最后一个已排日期的次日起，按日历生成 1 个月；
 //   轮转跨批次连续（配额从表格既有记录反推）；补偿插入义务优先安置。
-// - getBrief：昨日结果 + 今日名单一次取齐（pm-robot 每日播报数据源）。
+// - getBrief：昨日结果 + 今日名单一次取齐（通用数据接口；pm-robot 消费方案已作废，2026-09-12 口径）。
 // - getNextDuty：个人下一次值日查询。
 // ============================================================
 
@@ -141,7 +141,7 @@ function renderGenerateReply(result) {
 }
 
 /**
- * 对外数据接口数据源：昨日结果 + 今日名单（pm-robot 每日 12:00 播报调用）
+ * 对外数据接口数据源：昨日结果 + 今日名单（通用数据接口，保留备用）
  * @returns {{yesterday: {date, dayStatus, members: Array}, today: {date, members: Array}}}
  */
 async function getBrief() {

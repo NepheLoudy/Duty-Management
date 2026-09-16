@@ -4,6 +4,7 @@ const quietHours = require('../utils/quietHours');
 const inquiry = require('../services/inquiryService');
 const compensation = require('../services/compensationService');
 const assistant = require('../services/assistantService');
+const express = require('../services/expressService');
 
 // ============================================================
 // 定时任务（node-cron 6 段式 + Asia/Shanghai）：
@@ -46,6 +47,7 @@ function startCronJobs() {
     duty_lastcall: () => inquiry.sendLastCall(),
     duty_reconcile: () => compensation.reconcile(),
     duty_board_broadcast: () => assistant.broadcastTodayBoard(),
+    duty_express_broadcast: () => express.broadcastPending(),
   };
 
   tasks.push(scheduleTask(config.schedule.prevRemind, 'duty_prev_remind', '次日值日提醒', quietTaskRunners.duty_prev_remind));
@@ -53,6 +55,9 @@ function startCronJobs() {
   tasks.push(scheduleTask(config.schedule.lastCall, 'duty_lastcall', '收口前临门提醒', quietTaskRunners.duty_lastcall));
   tasks.push(scheduleTask(config.schedule.reconcile, 'duty_reconcile', '值日对账', quietTaskRunners.duty_reconcile));
   tasks.push(scheduleTask(config.schedule.boardBroadcast, 'duty_board_broadcast', '看板自动播报', quietTaskRunners.duty_board_broadcast));
+  // 快递未取播报（每小时整点 EXPRESS_BROADCAST_SCHEDULE；无未取跳过不发；过静默闸门，
+  // 冲刷补发时以补发时刻最新数据重查——夜间已被取完的不再播）
+  tasks.push(scheduleTask(config.express.broadcastSchedule, 'duty_express_broadcast', '快递未取播报', quietTaskRunners.duty_express_broadcast));
 
   // 收口：写表动作不延迟（不进 gateTask），仅通知载荷过闸门
   const deadlineTask = cron.schedule(config.schedule.deadline, () => {

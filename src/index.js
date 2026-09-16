@@ -5,6 +5,7 @@ const config = require('./config');
 const roster = require('./services/rosterService');
 const state = require('./services/stateStore');
 const assistant = require('./services/assistantService');
+const expressService = require('./services/expressService');
 const policy = require('./services/policyService');
 const scheduleService = require('./services/scheduleService');
 const inquiry = require('./services/inquiryService');
@@ -56,6 +57,12 @@ app.post('/api/chat/command', async (req, res) => {
     if (isDuplicateMessage(body.messageId)) {
       console.log('[指令] 重复消息已忽略:', body.messageId);
       return res.json({ reply: '' });
+    }
+
+    if (body.type === 'express_observe') {
+      // 快递登记窗口观察（hub 对快递群非@消息的转发；无窗口静默忽略）
+      const result = await expressService.observe(body);
+      return res.json({ reply: result.reply || '' });
     }
 
     if (body.type === 'image') {
@@ -137,7 +144,7 @@ app.post('/api/duty/whitelist', requireApiToken, (req, res) => {
   res.json({ success: true, names });
 });
 
-// ---------- 对外数据接口（pm-robot 每日值日播报数据源） ----------
+// ---------- 对外数据接口（通用值日简报数据接口，保留备用） ----------
 // { yesterday: {date, dayStatus, members:[{name, position, status, hasReceipt}]},
 //   today: {date, members:[{name, position}]} }
 

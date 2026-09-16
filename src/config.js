@@ -108,7 +108,28 @@ module.exports = {
     groupChatIds: parseArrayConfig(process.env.DUTY_GROUP_CHAT_IDS),
   },
 
-  // 运行时状态（监听会话/补偿义务/看板限流时间戳/连续缺勤计数）
+  // 快递助手（快递申领群专属，2026-09-17）：
+  // 窗口登记 → 「机器人项目看板」base 的「快递」表（用户手工建表，脚本只补缺失列）；
+  // 每小时整点未取播报（过静默闸门）；群清单留空回落值日管辖群
+  express: {
+    enabled: process.env.EXPRESS_ENABLED !== '0',
+    appToken: process.env.EXPRESS_BITABLE_APP_TOKEN || 'ZlVZbXDkRayUzSsFRiycznmZn5b',
+    tableId: process.env.EXPRESS_TABLE_ID || 'tblhQuGY9ZdqDSpc',
+    windowMinutes: Math.max(1, parseInt(process.env.EXPRESS_WINDOW_MINUTES, 10) || 5),
+    groupChatIds: parseArrayConfig(process.env.EXPRESS_GROUP_CHAT_IDS),
+    broadcastSchedule: process.env.EXPRESS_BROADCAST_SCHEDULE || '0 0 * * * *',
+    fields: {
+      code: process.env.EXPRESS_FIELD_CODE || '取件码',
+      image: process.env.EXPRESS_FIELD_IMAGE || '快递内容',
+      senderUser: process.env.EXPRESS_FIELD_SENDER || '发起人',
+      regTime: process.env.EXPRESS_FIELD_REG_TIME || '登记时间',
+      picked: process.env.EXPRESS_FIELD_PICKED || '是否取件',
+      pickedAt: process.env.EXPRESS_FIELD_PICKED_AT || '取件时间',
+      messageId: process.env.EXPRESS_FIELD_MESSAGE_ID || '消息ID',
+    },
+  },
+
+  // 运行时状态（监听会话/补偿义务/看板限流时间戳/连续缺勤计数/快递窗口与编号）
   // 生产环境必须配到项目目录之外（SFTP 部署会清空 /opt/duty-bot）
   stateFile: process.env.DUTY_STATE_FILE || path.join(ROOT, '.duty-state.json'),
 };
