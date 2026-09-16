@@ -192,10 +192,12 @@ async function confirmVariant(openId) {
 
 /**
  * 监听窗口内收到的图片：下载 → 转存多维表格 → 追加到本人岗位附件栏
- * @param {object} p { openId, imageKey, messageId }
+ * @param {object} p { openId, imageKey?, imageKeys?, messageId }
+ *   imageKeys（2026-09-17）：富文本/post 一次多图时 hub 全量透传，逐张收录后合并回执
  */
-async function handleImage({ openId, imageKey, messageId }) {
-  if (!openId || !imageKey) {
+async function handleImage({ openId, imageKey, imageKeys, messageId }) {
+  const keys = (Array.isArray(imageKeys) && imageKeys.length ? imageKeys : [imageKey]).filter(Boolean);
+  if (!openId || keys.length === 0) {
     return { handled: false, reply: '' };
   }
   const { session, rec } = await sessionRecord(openId);
@@ -203,14 +205,20 @@ async function handleImage({ openId, imageKey, messageId }) {
     return { handled: false, reply: '今天没有进行中的值日确认，照片暂不收集。发「值日助手」可查询你的排班。' };
   }
 
-  const buf = await client.downloadImage(messageId, imageKey);
-  const fileName = `duty_${session.date}_${session.position}_${session.name}_${(messageId || Date.now()).toString().slice(-8)}.jpg`;
-  const fileToken = await client.uploadMediaToBitable(buf, fileName);
-  const count = await dutyTable.appendReceipt(rec.recordId, session.position, fileToken);
+  const base = String(messageId || Date.now()).slice(-8);
+  let count = 0;
+  for (const [i, key] of keys.entries()) {
+    const buf = await client.downloadImage(messageId, key);
+    const fileName = `duty_${session.date}_${session.position}_${session.name}_${base}_${i + 1}.jpg`;
+    const fileToken = await client.uploadMediaToBitable(buf, fileName);
+    count = await dutyTable.appendReceipt(rec.recordId, session.position, fileToken);
+  }
   const doneMarked = rec.status === config.status.DONE;
+  console.log(`[图片] 已收录 ${keys.length} 张 → ${session.name}/${session.position}（该岗累计 ${count} 张，消息尾号 ${base}）`);
+  const plural = keys.length > 1 ? `共 ${keys.length} 张，` : '';
   return {
     handled: true,
-    reply: `📸 已收到第 ${count} 张照片，写入「${session.position}」凭证栏。`
+    reply: `📸 已收到${plural}写入「${session.position}」凭证栏（该岗累计 ${count} 张）。`
       + (doneMarked ? '今日值日已完成，辛苦了！' : '完成后记得回复「打卡」，收口（24:00）前有效。'),
   };
 }

@@ -315,11 +315,17 @@ function withImageLock(key, fn) {
   return next;
 }
 
-async function observeImage({ imageKey, openId, messageId }) {
-  if (!imageKey) return { handled: true, reply: '' };
+async function observeImage({ imageKey, imageKeys, openId, messageId }) {
+  const keys = (Array.isArray(imageKeys) && imageKeys.length ? imageKeys : [imageKey]).filter(Boolean);
+  if (keys.length === 0) return { handled: true, reply: '' };
   return withImageLock(openId || 'anon', async () => {
-    const buf = await client.downloadImage(messageId, imageKey);
-    const fileToken = await client.uploadMediaToBitable(buf, `express_${Date.now()}_${String(messageId || '').slice(-8) || 'img'}.jpg`);
+    // 一次多图（富文本/post）逐张下载，统一挂进同一条记录
+    const base = String(messageId || Date.now()).slice(-8) || 'img';
+    const tokens = [];
+    for (const [i, key] of keys.entries()) {
+      const buf = await client.downloadImage(messageId, key);
+      tokens.push(await client.uploadMediaToBitable(buf, `express_${Date.now()}_${base}_${i + 1}.jpg`));
+    }
     const all = await listExpressRecords();
     const win = getWindow();
 
@@ -329,8 +335,9 @@ async function observeImage({ imageKey, openId, messageId }) {
         && r.regMs >= (win ? win.openedAt : 0) - 5000)
       .pop();
     if (candidate) {
-      await updateExpressRecord(candidate.recordId, { [f().image]: [{ file_token: fileToken }] });
-      console.log(`[快递] 照片已补进「${candidate.code || '（未留码）'}」`);
+      const merged = candidate.imageTokens.concat(tokens).map((t) => ({ file_token: t }));
+      await updateExpressRecord(candidate.recordId, { [f().image]: merged });
+      console.log(`[快递] 照片 ${tokens.length} 张已补进「${candidate.code || '（未留码）'}」`);
       return { handled: true, reply: '' };
     }
 
@@ -338,14 +345,14 @@ async function observeImage({ imageKey, openId, messageId }) {
       return { handled: true, reply: '' };
     }
     const fields = {
-      [f().image]: [{ file_token: fileToken }],
+      [f().image]: tokens.map((t) => ({ file_token: t })),
       [f().regTime]: Date.now(),
       [f().picked]: '未取',
       [f().messageId]: messageId || '',
     };
     if (openId) fields[f().senderUser] = [{ id: openId }];
     await createExpressRecord(fields);
-    console.log(`[快递] 已登记纯图片快递（${openId ? senderOf(openId) : '未知'}），待补取件码`);
+    console.log(`[快递] 已登记纯图片快递（${openId ? senderOf(openId) : '未知'}，${tokens.length} 张），待补取件码`);
     return { handled: true, reply: '' };
   });
 }

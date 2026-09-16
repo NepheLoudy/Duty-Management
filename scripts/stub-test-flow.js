@@ -152,9 +152,15 @@ function check(desc, cond, detail = '') {
   const yesCompat = await assistant.handleCommand({ command: '是', openId: 'ou_test_a', chatType: 'p2p' });
   check('队员A 再回「是」→ 兼容保留（仍被值日分支接管）', yesCompat.handled === true, JSON.stringify(yesCompat));
   const imgB = await inquiry.handleImage({ openId: 'ou_test_b', imageKey: 'img_key_1', messageId: 'om_1' });
-  check('队员B 传照片 → 回执第 1 张', imgB.handled && imgB.reply.includes('第 1 张'), imgB.reply);
+  check('队员B 传照片 → 回执累计 1 张', imgB.handled && imgB.reply.includes('该岗累计 1 张'), imgB.reply);
+  // 多图（富文本一次多张，2026-09-17）：全量收录 + 累计计数
+  const imgB2 = await inquiry.handleImage({ openId: 'ou_test_b', imageKeys: ['img_key_2', 'img_key_3'], messageId: 'om_2' });
+  check('队员B 再传 2 张（多图载荷）→ 累计 3 张', imgB2.handled && imgB2.reply.includes('共 2 张') && imgB2.reply.includes('该岗累计 3 张'), imgB2.reply);
+  check('多图逐张下载：downloadImage 共收到 3 次入参', memory.downloadCalls.length === 3
+    && memory.downloadCalls[1][1] === 'img_key_2' && memory.downloadCalls[2][1] === 'img_key_3',
+    JSON.stringify(memory.downloadCalls));
   check('照片下载走消息资源接口：downloadImage 收到 (messageId, imageKey)',
-    memory.downloadCalls.length === 1 && memory.downloadCalls[0][0] === 'om_1' && memory.downloadCalls[0][1] === 'img_key_1',
+    memory.downloadCalls[0] && memory.downloadCalls[0][0] === 'om_1' && memory.downloadCalls[0][1] === 'img_key_1',
     JSON.stringify(memory.downloadCalls));
   const noC = await inquiry.handleNo('ou_test_c');
   check('队员C 回「否」→ 提示补救，不改状态', noC.handled && noC.reply.includes('收口前'));
@@ -163,7 +169,7 @@ function check(desc, cond, detail = '') {
   const recA = recs.find((r) => r.name === '队员A');
   const recB = recs.find((r) => r.name === '队员B');
   check('队员A 状态=已做完（打卡）', recA.status === '已做完', recA.status);
-  check('队员B 照片已挂「凭证-工位」', recB.receiptCounts['工位区'] === 1, JSON.stringify(recB.receiptCounts));
+  check('队员B 照片已挂「凭证-工位」（含多图共 3 张）', recB.receiptCounts['工位区'] === 3, JSON.stringify(recB.receiptCounts));
   check('队员B 状态仍为空（照片≠已完成）', !recB.status);
 
   // 陌生人/未绑定者
