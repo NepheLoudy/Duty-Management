@@ -228,6 +228,7 @@ function check(desc, cond, detail = '') {
   // 补位（2026-09-12 口径）：请假日插入第 4 条记录（同岗、非请假人），并私信被抽调人。
   // 从私信反查被抽调人再验证其当日同岗记录（当日可能存在早前插入的同岗记录，正向 find 会歧义）
   let dCanPlace = null; // 对账前快照：D 的义务能否就地安置（供步骤 7 断言用）
+  let dLeaveWeekStart = null; // D 义务目标周起点（供步骤 7 顺延断言比对）
   {
     const algo = require('../src/services/scheduleAlgo');
     const all = await dutyTable.getAllDayRecords();
@@ -253,6 +254,7 @@ function check(desc, cond, detail = '') {
     // 目标周能否安置 D 的义务——快照必须取**对账前**：安置本身会占掉空位日，
     // 对账后再算会自相矛盾（该断言曾对真实日期敏感误报，2026-09-13 修正）
     const weekStart = addDays(mondayOf(dLeave.dateStr), 7);
+    dLeaveWeekStart = weekStart;
     const weekEnd = addDays(weekStart, 6);
     const assignments = new Map();
     for (const r of all) {
@@ -280,9 +282,18 @@ function check(desc, cond, detail = '') {
   check('对账：补登记有回执提示', recon.report.includes('补登记 1 条'), recon.report);
   const recon2 = await compensation.reconcile({});
   check('对账：同一条手工标记不重复登记（去重）', !recon2.report.includes('补登记'), recon2.report);
+  // 断言定向到 D 本人（2026-09-19）：此前检查全局 stillQueued.length，会被同周其他
+  // 队员的义务（如 C 满周顺延）误伤——日期敏感误报即此因
+  const dObl = state.load().obligations.find((o) => o.name === '队员D' && o.reason === '已请假');
   check('对账：队员D 义务按目标周空位情况正确处置',
-    dCanPlace ? recon2.stillQueued.length === 0 : recon2.stillQueued.length === 1,
-    `canPlace(对账前)=${dCanPlace} queued=${recon2.stillQueued.length}`);
+    dCanPlace ? Boolean(dObl && dObl.placed) : Boolean(!dObl || !dObl.placed),
+    `canPlace(对账前)=${dCanPlace} placed=${dObl && dObl.placed} placedDate=${dObl && dObl.placedDate}`);
+  // 满周顺延（2026-09-19 新行为）：同周其它义务若无处安置，必须 placed 或顺延到目标周之后，
+  // 不允许静默留队等过期
+  const cLeaveObl = state.load().obligations.find((o) => o.name === '队员C' && o.reason === '已请假');
+  check('对账：满周无处安置的义务顺延不丢（placed 或 weekStart 后移）',
+    Boolean(cLeaveObl) && (cLeaveObl.placed || cLeaveObl.weekStart > dLeaveWeekStart),
+    JSON.stringify(cLeaveObl));
 
   // ---- 8. 值日助手指令 ----
   const help = await assistant.handleCommand({ command: '值日助手', openId: 'ou_test_a', chatType: 'p2p' });

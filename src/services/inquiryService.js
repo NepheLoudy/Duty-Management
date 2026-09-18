@@ -394,16 +394,14 @@ async function requestLeaveLocked(member) {
     console.error('[补位] 抽调失败（请假登记不受影响）:', err.message);
   }
   if (replacement && replacement.openId) {
-    // 私信被抽调人（失败不阻断请假回执，日志留痕管理员可转告）
-    try {
-      await bot.sendTextToUser(
-        replacement.openId,
-        `🧹 补位通知：${rec.dateStr}（${rec.position}）的值日因 ${member.name} 请假，已安排你补位。\n`
-        + '完成后请照常私信回复「打卡」并上传照片，收口（24:00）前完成即可。谢谢你！',
-      );
-    } catch (err) {
-      console.error(`[补位] 通知 ${replacement.name} 失败:`, err.message);
-    }
+    // 私信被抽调人：后台发送不 await（2026-09-19）——请假链路整串是表读写+私信，
+    // 串行发完才回执会顶爆 hub 转发超时（09-18 案例：请假登记成功但回执超时，
+    // 用户私聊侧看到的是失败）；失败不阻断请假回执，日志留痕管理员可转告
+    bot.sendTextToUser(
+      replacement.openId,
+      `🧹 补位通知：${rec.dateStr}（${rec.position}）的值日因 ${member.name} 请假，已安排你补位。\n`
+      + '完成后请照常私信回复「打卡」并上传照片，收口（24:00）前完成即可。谢谢你！',
+    ).catch((err) => console.error(`[补位] 通知 ${replacement.name} 失败:`, err.message));
   }
 
   const lines = [

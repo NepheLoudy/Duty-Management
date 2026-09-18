@@ -12,8 +12,10 @@ const bot = require('../feishu/bot');
 // - 动作：向该次值日所在自然周的下一周插入该队员 +1 次：
 //   · 下周已生成 → 就地插入（空位日 + 当周岗位计数最少的岗位，该日变 4 人）
 //   · 下周未生成 → 义务进 .duty-state.json 排队，生成排班表时优先安置
+//   · 下周已生成但该队员当周天天有班（小队多条补偿同周）→ 顺延到再下一周
+//     （weekStart+7、deferCount 计数，对账报告可见；不再静默留队到过期）
 // - 加罚：同一人连续两次轮到自己没做完/请假 → 多加 1 次（该缺勤周期共 3 次）
-// - 00:30 对账：核对下周插入义务是否全部安置，未安置补插
+// - 00:30 对账：核对下周插入义务是否全部安置，未安置补插或顺延
 // ============================================================
 
 function newId() {
@@ -111,17 +113,19 @@ function resetStreak(memberName) {
 }
 
 /**
- * 尝试就地安置未安置的义务：目标周已有排班 → 插入；目标周还没生成 → 留队。
- * @returns {{placed: Array, stillQueued: Array}}
+ * 尝试就地安置未安置的义务：目标周已有排班 → 插入；目标周还没生成 → 留队；
+ * 目标周已生成但该队员周内天天有班 → 顺延下一周（2026-09-19，小队满周退化路径）。
+ * @returns {{placed: Array, stillQueued: Array, deferred: Array, expired: Array}}
  */
 async function placePending(options = {}) {
   const dryRun = Boolean(options.dryRun);
   const placed = [];
   const stillQueued = [];
+  const deferred = [];
 
   const s = state.load();
   const pending = (s.obligations || []).filter((o) => !o.placed && !o.expired);
-  if (pending.length === 0) return { placed, stillQueued, expired: [] };
+  if (pending.length === 0) return { placed, stillQueued, deferred, expired: [] };
 
   const all = await dutyTable.getAllDayRecords();
 
@@ -164,7 +168,20 @@ async function placePending(options = {}) {
       assignments,
     });
     if (!plan) {
-      stillQueued.push(o); // 周内天天都有该队员（极小队），留队下次再试
+      // 周内天天都有该队员（极小队多条补偿同周）：顺延到下一周再试——
+      // 新周未生成时下轮自然转回「留队等生成」分支，不会死循环占座
+      const nextWeekStart = addDays(o.weekStart, 7);
+      if (!dryRun) {
+        state.mutate((st) => {
+          for (const o2 of st.obligations) {
+            if (o2.id === o.id) {
+              o2.weekStart = nextWeekStart;
+              o2.deferCount = (o2.deferCount || 0) + 1;
+            }
+          }
+        });
+      }
+      deferred.push({ ...o, weekStart: nextWeekStart });
       continue;
     }
     if (!dryRun) {
@@ -189,7 +206,7 @@ async function placePending(options = {}) {
     placed.push({ ...o, plan });
   }
 
-  return { placed, stillQueued, expired };
+  return { placed, stillQueued, deferred, expired };
 }
 
 /**
@@ -263,7 +280,7 @@ async function reconcile(options = {}) {
   }
 
   // 5) 补偿义务安置
-  const { placed, stillQueued, expired } = await placePending({ dryRun });
+  const { placed, stillQueued, deferred, expired } = await placePending({ dryRun });
 
   const lines = [
     `🧹 值日对账（${yesterday}）`,
@@ -272,9 +289,12 @@ async function reconcile(options = {}) {
   for (const b of backfilled) {
     lines.push(`- ⚠️ 补收口 ${b.date}：${b.count} 人未确认已置未做完（${b.names.join('、')}），补偿义务已登记`);
   }
-  lines.push(`- 补偿插入：本次安置 ${placed.length} 条，排队中 ${stillQueued.length} 条${expired.length ? `，过期标记 ${expired.length} 条（目标周已过去，请人工裁决）` : ''}${syncedCount ? `，补登记 ${syncedCount} 条（表格手工标记的请假/未做完）` : ''}`);
+  lines.push(`- 补偿插入：本次安置 ${placed.length} 条，排队中 ${stillQueued.length} 条${deferred.length ? `，顺延 ${deferred.length} 条（当周该队员天天有班，自动顺延下一周）` : ''}${expired.length ? `，过期标记 ${expired.length} 条（目标周已过去，请人工裁决）` : ''}${syncedCount ? `，补登记 ${syncedCount} 条（表格手工标记的请假/未做完）` : ''}`);
   for (const p of placed) {
     lines.push(`  · ${p.name} → ${p.plan.dateStr} ${p.plan.position}（${p.reason}）`);
+  }
+  for (const d of deferred) {
+    lines.push(`  · ${d.name} 义务顺延至 ${d.weekStart} 起的周（${d.reason}）`);
   }
 
   const report = lines.join('\n');
@@ -288,7 +308,7 @@ async function reconcile(options = {}) {
     }
   }
 
-  return { dayStatusChanged, yesterdayStatus: target, backfilled, placed, stillQueued, expired, report };
+  return { dayStatusChanged, yesterdayStatus: target, backfilled, placed, stillQueued, deferred, expired, report };
 }
 
 module.exports = { handleAbsence, resetStreak, placePending, reconcile, syncAbsenceObligations };
