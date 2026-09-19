@@ -81,16 +81,28 @@ function normalizeRecord(raw) {
   };
 }
 
+/**
+ * 快递表读取限频重试（2026-09-20）：整点播报/确认/登记与广场写入等同刻叠加，
+ * 共享 base 偶发 1254290——读操作幂等，短退避重试两次；仍失败按原错误抛出。
+ */
+async function readExpressRecordsWithRetry(url) {
+  let res;
+  for (let attempt = 1; ; attempt++) {
+    res = await client.requestAPI('GET', url, null);
+    if (res.code === 0 || res.code !== 1254290 || attempt >= 3) return res;
+    console.warn(`[快递] 快递表读取被限频（1254290），${attempt * 2}s 后重试（第 ${attempt}/2 次）`);
+    await new Promise((r) => setTimeout(r, attempt * 2000));
+  }
+}
+
 /** 快递表全量记录（登记时间升序；表小，直接全拉客户端过滤） */
 async function listExpressRecords() {
   const cfg = requireExpressTable();
   const out = [];
   let pageToken = '';
   do {
-    const res = await client.requestAPI(
-      'GET',
+    const res = await readExpressRecordsWithRetry(
       `/bitable/v1/apps/${cfg.appToken}/tables/${cfg.tableId}/records?page_size=500${pageToken ? `&page_token=${pageToken}` : ''}`,
-      null,
     );
     if (res.code !== 0) throw new Error(`快递表读取失败: ${res.msg} (${res.code})`);
     const data = res.data || {};

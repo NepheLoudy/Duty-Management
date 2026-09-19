@@ -103,10 +103,11 @@ async function runClose(options = {}) {
   return result;
 }
 
-/** cron 状态（管理接口用） */
+/** cron 状态（管理接口用）。任务数：6 个常规 + 1 个收口（快递播报加入后共 7，判 ≥6 容忍未来增减） */
 function getCronStatus() {
   return {
-    running: tasks.length === 6,
+    running: tasks.length >= 6,
+    taskCount: tasks.length,
     schedules: config.schedule,
     quietHours: quietHours.getStatus(),
   };
