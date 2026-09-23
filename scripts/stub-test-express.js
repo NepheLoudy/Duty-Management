@@ -165,6 +165,22 @@ function pendingRecords() {
   r = await express.handlePickup({ arg: '' });
   ok(r.reply.includes('唯一一件'), '单件：已取不带编号生效');
 
+  // 20. 无窗口：群图片直调路径（assistantService group 分支直达，不过 observe）静默——不落脏记录
+  state.mutate((st) => { delete st.express.window; });
+  const beforeImgs = rawRecords.length;
+  await express.handleImagePayload({ imageKey: 'k0', openId: 'ou_u1', messageId: 'm_img0', chatId: 'oc_express' });
+  ok(rawRecords.length === beforeImgs, '无窗口：群图片直调路径静默忽略');
+
+  // 21. 窗口内直调：非窗口群 chatId 静默
+  await express.openWindow({ chatId: 'oc_express', openId: 'ou_u1' });
+  sentToChat.length = 0;
+  await express.handleImagePayload({ imageKey: 'k8', openId: 'ou_x9', messageId: 'm_img2', chatId: 'oc_other' });
+  ok(rawRecords.length === beforeImgs, '窗口内直调：非窗口群图片静默忽略');
+
+  // 22. 窗口内直调：本群图片正常登记（旧记录均已取，无可配对对象 → 新建纯图记录）
+  await express.handleImagePayload({ imageKey: 'k9', openId: 'ou_x9', messageId: 'm_img1', chatId: 'oc_express' });
+  ok(pendingRecords().length === 1 && rawRecords[rawRecords.length - 1].fields['消息ID'] === 'm_img1', '窗口内直调：本群图片正常登记');
+
   console.log(`\n结果：${pass} 通过 / 0 失败`);
   try { fs.unlinkSync(config.stateFile); } catch { /* 忽略 */ }
   process.exit(0);

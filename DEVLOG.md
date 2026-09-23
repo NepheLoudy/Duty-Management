@@ -3,7 +3,7 @@
 > 版本隔离单位 = 一次 `npm run push`（即一次 git 提交 + 一次部署）。
 > 每次 push 完成后在文末追加：`## vN · YYYY-MM-DD · <提交哈希> · <类型>`，
 > 正文为提交说明原文 + 实际改动要点。vN 只增不复用，历史条目不改写。
-> 当前最新：**v34**（2026-09-20，随本提交落地）。
+> 当前最新：**v35**（2026-09-24，随本提交落地）。上一版 v34（09-20 动态广场停写批）。
 
 
 
@@ -337,3 +337,13 @@
 - 2026-09-20 用户拍板：动态广场相关功能由用户自维护，机器人只对各自现有业务看板负责。plaza.js `enabled()` 加 `PLAZA_ENABLED` 开关（默认关，显式设 `1` 才恢复写入）——停写后即使用户把「动态广场」表从回收站恢复/重建，机器人也不会往里灌数据；表在回收站期间的 TableIdNotFound warn 同步终结。
 - 值日完成/值日请假两处广场钩子保留代码不动（fire-and-forget 语义不变），仅由开关关断；`.env.example` 补注释。
 - 测试：flow/express 套件全过。
+
+### v35 · 2026-09-24 · 随本提交落地 · fix
+
+**复查修复批：快递图片窗口守卫 + 排班补偿义务即时落账（附 09-22 文档回填入库）**
+
+- 提交说明：fix: 快递群图片直调路径补窗口守卫+排班生成补偿义务逐日即时标记placed+新增stub-test-generate-place入闸门
+- **快递图片窗口守卫（P2）**：expressService.handleImagePayload（hub group 图片直调入口，不过 observe）缺「窗口活跃」检查——无窗口发图会写「未留码」脏记录，且 win=null 时补图配对条件恒真、可把历史任何无图未取记录补上图。补齐与 observe() 同款守卫（closeWindowIfDue + windowActive + chatId 匹配），注释声称的「无窗口静默」就此名副其实。
+- **排班补偿义务 placed 逐日即时标记（P2）**：generate 原在全部写表完成后统一标记 placed——约 30 次 batchCreate 中途抛错时已写日未落账，重试生成会把未标记义务二次安置成双倍插入。改为逐日写表成功即按 isInsertion 定向 mutate（placePending v32 同款防御）。
+- **测试**：新增 scripts/stub-test-generate-place.js（可控失败写表桩：中断后 placed 与已写日一致 / 重试只安置一次，4 断言，旧代码必红）；stub-test-express 补图片窗口三断言（29→32）；push 闸门与 package.json 补至全量 7 套；README 测试节补 express/generate-place。
+- **文档回填（09-22 遗留批随本提交入库）**：.env.example（LASTCALL 23:00 / DEADLINE 0:00 对齐代码默认 + 状态文件路径勘误）、AGENTS.md（定时链时刻 + 快递域联动契约 + M4 口径）、README（test-* 语义拆行 + 部署路径勘误）。

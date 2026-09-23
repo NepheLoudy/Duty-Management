@@ -15,7 +15,8 @@
     "test:policy": "node scripts/stub-test-policy.js",
     "test:roster": "node scripts/stub-test-roster.js",
     "test:board": "node scripts/stub-test-board-webhook.js",
-    "test:express": "node scripts/stub-test-express.js"
+    "test:express": "node scripts/stub-test-express.js",
+    "test:generate-place": "node scripts/stub-test-generate-place.js"
   },
   "keywords": [
     "feishu",

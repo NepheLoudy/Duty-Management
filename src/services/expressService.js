@@ -490,6 +490,12 @@ async function handleCommand(raw, payload = {}) {
 /** 图片载荷入口（hub 转发：群图片 → 窗口登记；无窗口静默） */
 async function handleImagePayload(payload = {}) {
   try {
+    // 与 observe() 同款窗口守卫：无窗口/非窗口群的图片不落记录（否则会写成
+    // 「未留码」脏条目，且 win=null 时补图配对条件恒真会污染历史无图记录）
+    await closeWindowIfDue();
+    const win = getWindow();
+    if (!windowActive(win)) return { handled: true, reply: '' };
+    if (payload.chatId && win.chatId !== payload.chatId) return { handled: true, reply: '' };
     return await observeImage(payload);
   } catch (err) {
     console.error('[快递] 图片登记失败:', err.message);

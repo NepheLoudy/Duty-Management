@@ -71,26 +71,44 @@ async function generate(options = {}) {
 
   if (!dryRun) {
     const createdIds = [];
-    for (const day of result.days) {
-      const items = day.items
-        .map((it) => ({ member: roster.findByName(it.name) || { name: it.name }, position: it.position }))
-        .filter((it) => Boolean(it.member));
-      const ids = await dutyTable.createDayRecords(day.date, items);
-      createdIds.push(...ids);
+    // 补偿义务按人排队：逐日写表成功后即时标记 placed（placePending v32 同款防御——
+    // 写表中途中断时已写日的义务已落账，管理员重试生成不会二次安置造成双倍补偿）
+    const pendingByMember = new Map();
+    for (const ins of insertions) {
+      if (!result.unplacedInsertions.includes(ins)) {
+        if (!pendingByMember.has(ins.name)) pendingByMember.set(ins.name, []);
+        pendingByMember.get(ins.name).push(ins.id);
+      }
     }
-
-    // 已安置的补偿义务标记 placed；未安置（周内无空位）保留排队
-    const placedIds = new Set(insertions.filter((ins) => !result.unplacedInsertions.includes(ins)).map((ins) => ins.id));
-    if (placedIds.size > 0) {
+    const markPlaced = (ids) => {
+      if (ids.length === 0) return;
       state.mutate((s) => {
         for (const o of s.obligations) {
-          if (placedIds.has(o.id)) {
+          if (ids.includes(o.id)) {
             o.placed = true;
             o.placedAt = new Date().toISOString();
             o.via = 'generate';
           }
         }
       });
+    };
+    for (const day of result.days) {
+      const items = day.items
+        .map((it) => ({
+          member: roster.findByName(it.name) || { name: it.name },
+          position: it.position,
+          insertionName: it.isInsertion ? it.name : '',
+        }))
+        .filter((it) => Boolean(it.member));
+      const ids = await dutyTable.createDayRecords(day.date, items);
+      createdIds.push(...ids);
+      const dayPlaced = [];
+      for (const it of items) {
+        if (!it.insertionName) continue;
+        const q = pendingByMember.get(it.insertionName);
+        if (q && q.length > 0) dayPlaced.push(q.shift());
+      }
+      markPlaced(dayPlaced);
     }
   }
 

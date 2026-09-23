@@ -120,16 +120,17 @@
 | GET | `/api/health` | 健康检查（含静默窗口状态） |
 | POST | `/api/chat/command` | hub 指令转发：`{command, openId, chatType, chatId?, messageId?, args?}`；图片 `{type:'image', openId, imageKey, messageId}`；返回 `{reply}`，reply 空串=已自行处理（群看板卡片）或未接管（无会话口语变体，hub 落回常规流程） |
 | GET | `/api/duty/brief` | 昨日结果+今日名单一次取齐（M4 已由看板卡自身实现；本接口保留为通用数据接口） |
-| POST | `/api/bot/test-remind` / `test-ask` / `test-close` / `test-reconcile` / `test-generate` / `test-board` | 手动触发（body `{"dryRun":true}` 只预览不发送/不落表） |
+| POST | `/api/bot/test-remind` / `test-ask` / `test-lastcall` / `test-close` / `test-reconcile` | 手动触发（body `{"dryRun":true}` 只预览不发送/不落表） |
+| POST | `/api/bot/test-generate` / `test-board` | 手动触发（**默认即预览**，body `{"confirm":true}` 才正式生成/实发） |
 | GET | `/api/bot/cron-status` | 定时任务与静默状态 |
 
 ## 配置
 
 `.env` 真值不进 git（本地 .env 是部署源头，push 时覆盖部署目标；`NAS_*` 键为历史命名，现=小电脑 192.168.31.57:22），键位清单见 `.env.example`：
-共用应用凭据、表格 token、字段名映射、五个 cron 时刻、生成跨度/间隔、`DUTY_ADMIN_OPEN_IDS`
+共用应用凭据、表格 token、字段名映射、六个 cron 时刻（另有快递整点播报时刻）、生成跨度/间隔、`DUTY_ADMIN_OPEN_IDS`
 （可选覆盖）、看板限流、看板 webhook 通道（`DUTY_BOARD_WEBHOOK_URL/SECRET`）、
 `DUTY_STATE_FILE`（**生产必须放项目目录之外**，SFTP 部署会清空
-`/opt/duty-bot`）、`QUIET_HOURS_*`、NAS 连接。
+`/c/qianli/opt/duty-bot`）、`QUIET_HOURS_*`、NAS 连接。
 
 ### 隐私约定（重要）
 
@@ -147,6 +148,8 @@ npm run test:flow       # 私信闭环干跑（内存表格：询问→是/照�
 npm run test:policy     # 管辖策略（policy 下发/管辖判定/看板拒绝与放行）
 npm run test:roster     # 名册同步与定制窗口（通讯录同步/白名单）
 npm run test:board      # 看板 webhook 通道（payload/签名/错误路径/通道选择/限流）
+npm run test:express    # 快递助手（窗口/登记/配对/取件/播报/图片窗口守卫）
+npm run test:generate-place  # 排班生成补偿义务 placed 即时标记（中断不双倍补偿）
 npm run table:check     # 校验 .env 配置的表格字段是否符合约定
 npm run table:create    # 自动新建 Bitable+排班表（打印 app_token/table_id 供 .env 回填）
 ```
@@ -157,7 +160,7 @@ npm run table:create    # 自动新建 Bitable+排班表（打印 app_token/tabl
 
 1. 唯一入口 `npm run push "提交说明"`（提交 → 推送 → NAS → pm2 重启）；
 2. push.js 与 approval-bot 同构，四处差异：`TAR_NAME=duty-bot-deploy.tar.gz`、
-   `REMOTE_DIR=/opt/duty-bot`、`GIT_REMOTE=https://github.com/NepheLoudy/duty-bot.git`（建仓前
+   `REMOTE_DIR=/c/qianli/opt/duty-bot`、`GIT_REMOTE=https://github.com/NepheLoudy/Duty-Management.git`（建仓前
    git push 失败会自动走 SFTP 直传）、`PM2_NAME=duty-bot`（首启后 `pm2 save`）；
 3. `.env` 与真实名册/白名单每次 push 显式 SFTP 到 NAS（不进 git）；
 4. 上线验证：pm2 online → `/api/health` 200 → `test-generate` dryRun 预览 → `test-remind`/
