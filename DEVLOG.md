@@ -3,7 +3,7 @@
 > 版本隔离单位 = 一次 `npm run push`（即一次 git 提交 + 一次部署）。
 > 每次 push 完成后在文末追加：`## vN · YYYY-MM-DD · <提交哈希> · <类型>`，
 > 正文为提交说明原文 + 实际改动要点。vN 只增不复用，历史条目不改写。
-> 当前最新：**v37**（2026-09-25，`b8db8a6`）。上一版 v36（7a7a361，09-24 值日公平性批）。
+> 当前最新：**v38**（2026-09-25，随本提交落地）。上一版 v37（b8db8a6，09-25 值日全面检修）。更早：v36（7a7a361，09-24 值日公平性批）。
 
 
 
@@ -375,3 +375,14 @@
 - **④排班重排**（scheduleService.rebalance + POST /api/bot/rebalance）：清理「今天之后未完成」班次→义务重置（placed 落点被删的回退未安置）→从明天起重排（每天严格 3 人）；历史与已定状态（已请假/未做完）保留留痕并计入配额反推（占配额防同人同日重排）；执行前全表原始记录 JSON 自动备份到数据目录 backup/（不备份不删除）；默认 dryRun 预览、confirm=true 才执行。generate 支持显式 startDateStr/extraHistoryRecordIds/weeklyAllowance 覆盖（重排场景专用）。
 - **测试**：flow 重构——补位断言改「当日空缺无第 4 条/无补位私信」；新增 7.5 三组（planInsertion 请假位优先/周容量 K=2 第三条留队/rebalance 预览+执行+重排后每周 4 人日≤K）；bitable stub 补 batchDeleteRecords；主流程 env K=10 保旧断言稳定。全量 7 套过。
 - **文档**：README（排班规则四节重写+API 表 rebalance+.env.example）、registry、用户侧 HTML/MD。
+
+## v38 · 2026-09-25 · 随本提交落地 · fix+docs
+
+**请假口径文案收尾 + 隐私残留清理 + 全量审查文档批（审批对齐）**
+
+- 提交说明：fix: 请假补位文案收尾（D-7 预告/请假确认改同日兼顾口径）+ 对账报告区分容量顺延 + reb_*.json 隐私残留清理 + 全量审查文档批
+- **文案收尾（用户可见，v37 漏网）**：inquiryService D-7 值日预告与「我要请假」确认文案仍写「会安排补位/由其他队员补位」，与 v37 废补位口径矛盾（第一步说补位、确认后说空缺）——统一改为「当日该岗由同日队员兼顾，下周自动补插一次值日」。
+- **对账报告**：顺延原因区分 deferReason=weekly_allowance（「含当周插入容量已满」）与满周顺延（「当周该队员天天有班」），README 宣称的「对账报告可见」落到原因层面。
+- **隐私残留清理**：reb_confirm.json / reb_preview.json（rebalance 一次性运维输出，含全员真实姓名与排班明细，v37 哈希回填提交误入库）已从历史抹除——删除 amend 进原 docs 提交后 force push（b8c1d59 → ceeb77b），远端历史不再含姓名；.gitignore 补 reb_*.json 防再犯。
+- **文档批（全量审查对齐）**：AGENTS 补 D-7 20:05 预告/两步确认词形/imageKeys 多图/快递归属信号；README API 表补 policy(POST)/roster/whitelist 四行、图片载荷补 imageKeys、当日总状态口径改「全部记录均已做完」；.env.example 补 DUTY_WEEK_REMIND_SCHEDULE、头注释去「6 段式」、状态文件示例带盘符；bot.js/webhook.js 头注释改值日战报现状。
+- **测试**：全量 7 套桩过（schedule/flow/policy/roster/board/express/generate-place）；改动仅文案字符串与报告渲染，无逻辑分支变化。

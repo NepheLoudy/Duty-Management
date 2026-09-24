@@ -96,7 +96,7 @@ async function sendWeekAheadRemind(options = {}) {
       `📅 值日预告：一周后（${date}）是你的值日日，岗位【${rec.position}】`,
       `职责：${positionDutyText(rec.position)}`,
       '',
-      '提前留意当天的时间安排；如需请假，届时回复「我要请假」即可（会安排补位，下周自动补一次值日）。',
+      '提前留意当天的时间安排；如需请假，届时回复「我要请假」即可（请假当日该岗由同日队员兼顾，下周自动补一次值日）。',
     ].join('\n');
     if (dryRun) {
       sent.push({ name: member.name, position: rec.position, preview: text });
@@ -443,7 +443,7 @@ async function requestLeave(member) {
     reply: [
       `🗓 请假确认：你将于 ${rec.dateStr}（${rec.position}）值日。`,
       '确认请假请回复「确认请假」（10 分钟内有效）；误触请回复「取消请假」。',
-      '确认后：当次置已请假，当日由其他队员补位，下周自动补插一次值日。',
+      '确认后：当次置已请假，当日该岗由同日队员兼顾，下周自动补插一次值日。',
     ].join('\n'),
   };
 }

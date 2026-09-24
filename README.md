@@ -44,7 +44,8 @@
 | 完成状态 | 单选 | 已做完 / 已请假 / 未做完（空=待定） |
 | 当日总状态 | 单选 | 今日完成值日（三条记录同步写） |
 
-当日总状态判定：三个附件栏各有 ≥1 个附件 **且** 3 条完成状态均为已做完。
+当日总状态判定：三个附件栏各有 ≥1 个附件 **且** 当日**全部记录**完成状态均为已做完
+（基准 3 人日即 3 条；缺勤插入日为 4 条、含已请假记录的日子也按全量口径判，比"仅 3 条"更严）。
 
 > 生产表（2026-09-11 接线）：`机器人项目看板` 库 ·「值日看板」表，列名经 `.env` 的 `DUTY_FIELD_*`
 > 映射——姓名 / 人员(人员) / 值日时间(日期) / 负责区域(岗位) / 附件1·附件2·附件3(凭证×3) /
@@ -130,7 +131,13 @@
 | 方法 | 路径 | 说明 |
 | --- | --- | --- |
 | GET | `/api/health` | 健康检查（含静默窗口状态） |
-| POST | `/api/chat/command` | hub 指令转发：`{command, openId, chatType, chatId?, messageId?, args?}`；图片 `{type:'image', openId, imageKey, messageId}`；返回 `{reply}`，reply 空串=已自行处理（群看板卡片）或未接管（无会话口语变体，hub 落回常规流程） |
+| POST | `/api/chat/command` | hub 指令转发：`{command, openId, chatType, chatId?, messageId?, args?}`；图片 `{type:'image', openId, imageKey\|imageKeys, messageId}`（v31 起多图数组）；返回 `{reply}`，reply 空串=已自行处理（群看板卡片）或未接管（无会话口语变体，hub 落回常规流程） |
+| GET | `/api/duty/policy` | 定制窗口：值日域管辖策略全景（管辖群/生效范畴/词形放行清单/p2p 指令清单，hub 短缓存消费的单一事实来源） |
+| POST | `/api/duty/policy` | 管辖群在线改写（X-API-Token）：改 `DUTY_GROUP_CHAT_IDS` 无需重启 |
+| GET | `/api/duty/roster` | 名册全景（通讯录自动同步 + 绑定 + admin 标记） |
+| POST | `/api/duty/roster/refresh` | 手动触发一轮通讯录同步（X-API-Token） |
+| GET | `/api/duty/whitelist` | 运维台白名单（值日排除名单）读取 |
+| POST | `/api/duty/whitelist` | 白名单增删（X-API-Token，运维台定制中心直写通道） |
 | GET | `/api/duty/brief` | 昨日结果+今日名单一次取齐（M4 已由看板卡自身实现；本接口保留为通用数据接口） |
 | POST | `/api/bot/test-remind` / `test-week-remind` / `test-ask` / `test-lastcall` / `test-close` / `test-reconcile` | 手动触发（body `{"dryRun":true}` 只预览不发送/不落表；`test-week-remind`=D-7 预告，2026-09-24） |
 | POST | `/api/bot/test-generate` / `test-board` | 手动触发（**默认即预览**，body `{"confirm":true}` 才正式生成/实发） |

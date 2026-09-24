@@ -6,11 +6,12 @@
 对外值日数据接口（/api/duty/brief）、
 **值日域管辖策略下发（/api/duty/policy）+ 名册自动读通讯录 + 定制窗口（roster/whitelist）**。
 
-- 定时私信链=20:00 次日预告 → 18:30 当日询问 → 23:00 临门提醒 → 24:00（午夜）收口（未做完者本人私信告知补偿）→ 00:30 对账；12:00 看板播报。
+- 定时私信链=20:00 次日预告 → 20:05 值日周预告（D-7，v36 起）→ 18:30 当日询问 → 23:00 临门提醒 → 24:00（午夜）收口（未做完者本人私信告知补偿）→ 00:30 对账；12:00 看板播报。
 
 ## 归属信号（需求关键词）
 值日、排班表、轮岗、值日请假、总负责/工位区/装配区、
-值日照片凭证、值日看板、昨日值日播报。
+值日照片凭证、值日看板、昨日值日播报、排班重排（rebalance）、
+快递、取件码、未取/已取（快递助手，2026-09-17 起）。
 
 ## 不归我管（易混裁定）
 - DDL 卡片及其它项目管理播报 → project-management-robot（值日看板卡由本项目自渲染自播，不经 pm-robot）；
@@ -20,9 +21,9 @@
 
 ## 联动契约
 - hub → duty-bot：POST /api/chat/command
-  `{command, openId, chatType:'p2p'|'group', chatId?, imageKey?, messageId?, args?}`
-  指令清单（精确匹配）：值日助手 / 我要请假 / 查询我的下一次值日 / 绑定 X / 打卡 / 打卡了 / 是 / 否 / 生成排班表(admin)；
-  图片载荷：`{type:'image', openId, imageKey, messageId}`（hub 不做下载转存，由本项目处理）；
+  `{command, openId, chatType:'p2p'|'group', chatId?, imageKey?|imageKeys?, messageId?, args?}`
+  指令清单（精确匹配）：值日助手 / 我要请假 / 确认请假 / 取消请假 / 查询我的下一次值日 / 绑定 X / 打卡 / 打卡了 / 是 / 否 / 生成排班表(admin)（确认/取消请假为 v36 起两步确认词形）；
+  图片载荷：`{type:'image', openId, imageKey|imageKeys, messageId}`（v31 起支持 imageKeys 数组多图逐张收录；hub 不做下载转存，由本项目处理）；
   快递域指令（2026-09-17）：快递助手 / 快递 / 查询当前快递 / 已取n / 全部已取；
   观察载荷：`{type:'express_observe', ...}`（快递群登记窗口内非@消息，无窗口静默忽略）。
 - duty-bot → pm-robot：GET /api/duty/brief（昨日结果+今日名单）——保留为通用数据接口，pm-robot 已不消费。

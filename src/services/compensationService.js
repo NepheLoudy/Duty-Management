@@ -319,7 +319,7 @@ async function reconcile(options = {}) {
   for (const b of backfilled) {
     lines.push(`- ⚠️ 补收口 ${b.date}：${b.count} 人未确认已置未做完（${b.names.join('、')}），补偿义务已登记`);
   }
-  lines.push(`- 补偿插入：本次安置 ${placed.length} 条，排队中 ${stillQueued.length} 条${deferred.length ? `，顺延 ${deferred.length} 条（当周该队员天天有班，自动顺延下一周）` : ''}${expired.length ? `，过期标记 ${expired.length} 条（目标周已过去，请人工裁决）` : ''}${syncedCount ? `，补登记 ${syncedCount} 条（表格手工标记的请假/未做完）` : ''}`);
+  lines.push(`- 补偿插入：本次安置 ${placed.length} 条，排队中 ${stillQueued.length} 条${deferred.length ? `，顺延 ${deferred.length} 条（${deferred.some((d) => d.deferReason === 'weekly_allowance') ? '含当周插入容量已满' : '当周该队员天天有班'}，自动顺延下一周）` : ''}${expired.length ? `，过期标记 ${expired.length} 条（目标周已过去，请人工裁决）` : ''}${syncedCount ? `，补登记 ${syncedCount} 条（表格手工标记的请假/未做完）` : ''}`);
   for (const p of placed) {
     lines.push(`  · ${p.name} → ${p.plan.dateStr} ${p.plan.position}（${p.reason}）`);
   }

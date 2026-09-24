@@ -13,6 +13,8 @@ config/whitelist.json
 # 运行时状态（含会话/补偿义务等，勿提交）
 .duty-state.json
 .quiet-backlog.json
+# rebalance 预览/确认的运维输出（含真实姓名与排班明细，严禁提交）
+reb_*.json
 
 # 日志
 *.log

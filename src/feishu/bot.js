@@ -5,7 +5,8 @@ const { requestAPI } = require('./client');
 // - 定时提醒/询问/收口回执：私信（sendTextToUser）
 // - 群看板（值日助手）：主通道为群自定义机器人 webhook（feishu/webhook.js），
 //   未配置 DUTY_BOARD_WEBHOOK_URL 时回退本层 sendCardToChat
-// 群播报（昨日值日+今日名单）不在本项目：由 pm-robot 经群 webhook 渲染发送。
+// 「昨日值日播报」已并入本项目看板卡的「昨日战报」段（12:00 与手动看板同卡，
+// 原pm-robot 渲染方案作废）。
 // ============================================================
 
 // 230013 = 机器人对该用户不可用：飞书「应用可用范围」不含对方，属平台 ACL，API 无法绕过
