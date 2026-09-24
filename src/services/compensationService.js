@@ -25,8 +25,8 @@ function newId() {
 
 /**
  * 登记一次缺勤：生成下周插入义务。
- * 加罚只计「未做完」（2026-09-24）：主动请假属合规安排（可提前查班、请假即有补位、
- * 补偿总量守恒），不计入连续缺勤——否则一次请假翻倍成两次补偿，惩罚滚雪球
+ * 加罚只计「未做完」（2026-09-24）：主动请假属合规安排（可提前查班、请假当日由同日
+ * 队员兼顾、补偿总量守恒），不计入连续缺勤——否则一次请假翻倍成两次补偿，惩罚滚雪球
  * （叠加补位抽调后会反复选中同一人）。连续两次「未做完」仍触发加罚（+1）后计数清零。
  * @param {string} memberName
  * @param {string} dutyDateStr 缺勤那次值日的日期（义务插到其所在自然周的下一周）
@@ -188,11 +188,14 @@ async function placePending(options = {}) {
             if (o2.id === o.id) {
               o2.weekStart = nextWeekStart;
               o2.deferCount = (o2.deferCount || 0) + 1;
+              delete o2.deferReason; // 满周顺延清掉旧的容量顺延标记，防持久化层脏读
             }
           }
         });
       }
-      deferred.push({ ...o, weekStart: nextWeekStart });
+      // 显式携带 deferCount/deferReason：mutate 是「读盘-改-写盘」语义，o 与写盘副本
+      // 不共享引用，spread 不会带上 mutate 里的设置（v39 复查修复）
+      deferred.push({ ...o, weekStart: nextWeekStart, deferCount: (o.deferCount || 0) + 1, deferReason: '' });
       continue;
     }
     // 周容量闸门（非请假位）：本周插入额度用尽 → 顺延下一周
@@ -209,7 +212,7 @@ async function placePending(options = {}) {
           }
         });
       }
-      deferred.push({ ...o, weekStart: nextWeekStart });
+      deferred.push({ ...o, weekStart: nextWeekStart, deferCount: (o.deferCount || 0) + 1, deferReason: 'weekly_allowance' });
       continue;
     }
     if (!dryRun) {

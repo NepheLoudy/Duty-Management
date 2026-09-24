@@ -74,7 +74,7 @@ async function sendPrevDayRemind(options = {}) {
 
 /**
  * D-7 20:05 值日预告（2026-09-24 新增）：私信一周后的当日值日队员。
- * 动机：被补偿/加罚插入的班次队员往往临近才发现自己有班（临时请假牵动补位），
+ * 动机：被补偿/加罚插入的班次队员往往临近才发现自己有班（临时请假牵动补偿安置），
  * 提前一周点名，留足请假/换安排的余量。预告不带打卡指引（D-1 20:00 次日提醒再发详细版）。
  * @returns {{date, sent: number, skipped: Array, preview: Array}}
  */
@@ -399,7 +399,7 @@ async function closeToday(options = {}) {
  * 连续排班/多条未完结时取最近一次，回执点名日期。
  * @param {{name: string}} member 已按 open_id 解析出的成员
  */
-// 请假链路全局串行（2026-09-13）：读全表→选候选→写补位记录是读改写链，
+// 请假链路全局串行（2026-09-13）：读全表→选候选→置已请假是读改写链，
 // 并发请假（跨成员）会选中同一候选造成同日同岗双插——请假低频，全局链无性能影响
 let leaveChain = Promise.resolve();
 function withLeaveLock(fn) {

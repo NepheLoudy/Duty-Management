@@ -47,7 +47,7 @@ function buildBoardCard(dateStr, records, yesterday) {
     || records.map((r) => r.dayStatus).find(Boolean)
     || null;
 
-  // 按岗位聚合渲染（2026-09-13）：补位/补偿会产生同岗多人（4 人日），
+  // 按岗位聚合渲染（2026-09-13）：补偿/加罚插入会产生同岗多人（4 人日），
   // 旧 find 只取第一条会隐藏另一人（可能恰是实际顶班者）
   const lineFor = (rec, pos, showPhoto) => {
     const statusText = rec.status || '待定';

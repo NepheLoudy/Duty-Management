@@ -306,6 +306,13 @@ function check(desc, cond, detail = '') {
   check('对账：满周无处安置的义务顺延不丢（placed 或 weekStart 后移）',
     Boolean(cLeaveObl) && (cLeaveObl.placed || cLeaveObl.weekStart > dLeaveWeekStart),
     JSON.stringify(cLeaveObl));
+  // v39 回归：满周顺延的 deferReason 必须为空——对账报告区分「天天有班」与「容量已满」
+  // 两种顺延原因，deferred spread 时序缺陷曾使容量标记串位/缺失（2026-09-25 复查修复）
+  if (cLeaveObl && !cLeaveObl.placed && cLeaveObl.weekStart > dLeaveWeekStart) {
+    check('对账：满周顺延报告口径为「天天有班」（deferReason 时序修复回归）',
+      recon.report.includes('当周该队员天天有班') && !recon.report.includes('含当周插入容量已满'),
+      recon.report);
+  }
 
   // ---- 7.5 加罚口径 + 补位密度（2026-09-24，置于对账后避免新义务被安置干扰 brief 断言） ----
   {

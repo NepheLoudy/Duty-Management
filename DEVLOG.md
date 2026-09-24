@@ -3,7 +3,7 @@
 > 版本隔离单位 = 一次 `npm run push`（即一次 git 提交 + 一次部署）。
 > 每次 push 完成后在文末追加：`## vN · YYYY-MM-DD · <提交哈希> · <类型>`，
 > 正文为提交说明原文 + 实际改动要点。vN 只增不复用，历史条目不改写。
-> 当前最新：**v38**（2026-09-25，`7781ee1`）。上一版 v37（b8db8a6，09-25 值日全面检修）。更早：v36（7a7a361，09-24 值日公平性批）。
+> 当前最新：**v39**（2026-09-25，随本提交落地）。上一版 v38（对账文案+文档批，`7781ee1`）。更早：v37（b8db8a6，09-25 值日全面检修）、v36（7a7a361，09-24 值日公平性批）。
 
 
 
@@ -386,3 +386,13 @@
 - **隐私残留清理**：reb_confirm.json / reb_preview.json（rebalance 一次性运维输出，含全员真实姓名与排班明细，v37 哈希回填提交误入库）已从历史抹除——删除 amend 进原 docs 提交后 force push（b8c1d59 → ceeb77b），远端历史不再含姓名；.gitignore 补 reb_*.json 防再犯。
 - **文档批（全量审查对齐）**：AGENTS 补 D-7 20:05 预告/两步确认词形/imageKeys 多图/快递归属信号；README API 表补 policy(POST)/roster/whitelist 四行、图片载荷补 imageKeys、当日总状态口径改「全部记录均已做完」；.env.example 补 DUTY_WEEK_REMIND_SCHEDULE、头注释去「6 段式」、状态文件示例带盘符；bot.js/webhook.js 头注释改值日战报现状。
 - **测试**：全量 7 套桩过（schedule/flow/policy/roster/board/express/generate-place）；改动仅文案字符串与报告渲染，无逻辑分支变化。
+
+## v39 · 2026-09-25 · 随本提交落地 · fix
+
+**复查修复：对账报告 deferReason 时序缺陷（v38 修复自身漏网）+ 旧口径注释清理**
+
+- 提交说明：fix: deferred spread 时序缺陷——容量/满周顺延显式携带 deferReason/deferCount（复查批）+ 旧口径注释清理
+- **缺陷（独立复查发现）**：v38 的对账报告按 `deferReason==='weekly_allowance'` 区分顺延原因，但 `deferred.push({ ...o })` 的 `o` 来自独立 `load()` 快照，而 `stateStore.mutate` 是「读盘-改-写盘」语义（写盘副本与局部对象不共享引用）——mutate 里设置的 `deferReason` 不会出现在 spread 出的元素上：首次容量顺延恒误报「天天有班」，反向满周顺延会带入持久化的陈旧 `weekly_allowance` 误报「容量已满」。
+- **修复**：两条顺延路径 push 时显式携带 `deferCount`（+1 后值）与 `deferReason`（容量='weekly_allowance'/满周=''），满周路径 mutate 里同步 `delete o2.deferReason` 防持久化层脏读。
+- **注释清理**：compensationService:28（请假即有补位→同日兼顾）、inquiryService:77/:402、stateStore:11、assistantService:50 等按 v37 后口径改写。
+- **测试**：stub-test-flow 补条件断言「满周顺延报告口径为天天有班」（当前桩日期下 C 的义务被安置未触发顺延分支，断言作为该分支护栏保留）；全量 7 套桩过。
