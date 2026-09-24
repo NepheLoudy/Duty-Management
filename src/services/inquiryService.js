@@ -498,33 +498,12 @@ async function requestLeaveLocked(member, knownRecordId) {
   const { penalty } = compensation.handleAbsence(member.name, rec.dateStr, config.status.LEAVE);
   plaza.append({ event: '值日请假', title: `${member.name}（${rec.position}，${rec.dateStr}）` });
 
-  // 请假当日补位（2026-09-12 口径）：从较远的排班抽调一人顶上；找不到候选则当日空缺
-  let replacement = null;
-  try {
-    replacement = await scheduleService.arrangeReplacement({
-      dateStr: rec.dateStr,
-      position: rec.position,
-      excludeName: member.name,
-    });
-  } catch (err) {
-    console.error('[补位] 抽调失败（请假登记不受影响）:', err.message);
-  }
-  if (replacement && replacement.openId) {
-    // 私信被抽调人：后台发送不 await（2026-09-19）——请假链路整串是表读写+私信，
-    // 串行发完才回执会顶爆 hub 转发超时（09-18 案例：请假登记成功但回执超时，
-    // 用户私聊侧看到的是失败）；失败不阻断请假回执，日志留痕管理员可转告
-    bot.sendTextToUser(
-      replacement.openId,
-      `🧹 补位通知：${rec.dateStr}（${rec.position}）的值日因 ${member.name} 请假，已安排你补位。\n`
-      + '完成后请照常私信回复「打卡」并上传照片，收口（24:00）前完成即可。谢谢你！',
-    ).catch((err) => console.error(`[补位] 通知 ${replacement.name} 失败:`, err.message));
-  }
-
+  // 请假当日空缺（2026-09-25 口径，替代旧「抽人补位」）：不再临时抽人顶班——
+  // 补位抽调的人无准备无意愿，烂尾率高（09-24 补位班全员未做完即此因），且抽调
+  // 是加插会推高当日人数。当日该岗由同日另两位队员兼顾，请假人仍进下周补偿。
   const lines = [
     `✅ 已登记请假：${rec.dateStr}（${rec.position}）`,
-    replacement
-      ? `补位安排：已从较远的排班抽调 ${replacement.name} 当日顶上（你会收到下周补偿安排，工作量总量不变）。`
-      : '暂无可抽调人选，当日该岗将空缺，管理员会另行安排。',
+    `当日安排：该岗将空缺，由同日另两位队员兼顾，管理员会知悉。`,
     `补偿安排：下周（${rec.dateStr} 所在周的下一周）会自动插入一次值日，生成排班表时优先安置。`,
   ];
   if (penalty) {

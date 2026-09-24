@@ -81,6 +81,26 @@ async function updateRecord(recordId, fields) {
   return res.data;
 }
 
+/** 批量删除记录（重排用；自动按 50 条分片，返回全部 record_id） */
+async function batchDeleteRecords(recordIds) {
+  requireConfig();
+  const deleted = [];
+  const CHUNK = 50;
+  for (let i = 0; i < recordIds.length; i += CHUNK) {
+    const chunk = recordIds.slice(i, i + CHUNK);
+    const res = await requestAPI(
+      'POST',
+      `/bitable/v1/apps/${config.bitable.appToken}/tables/${config.bitable.tableId}/records/batch_delete`,
+      { records: chunk }
+    );
+    if (res.code !== 0) {
+      throw new Error(`批量删除排班记录失败: ${res.msg} (code: ${res.code})`);
+    }
+    for (const item of res.data?.records || []) deleted.push(item.record_id);
+  }
+  return deleted;
+}
+
 /** 字段清单（init-duty-table 校验/建表用） */
 async function listFields() {
   requireConfig();
@@ -148,6 +168,7 @@ module.exports = {
   listAllRecords,
   batchCreateRecords,
   updateRecord,
+  batchDeleteRecords,
   listFields,
   createBaseApp,
   createTable,

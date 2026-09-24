@@ -222,6 +222,18 @@ app.post('/api/bot/test-generate', requireApiToken, async (req, res) => {
   }
 });
 
+// 排班重排（2026-09-25 检修）：清理未来未完成班次并重新生成（每天严格 3 人）。
+// 默认预览删除/义务重置清单；body {"confirm":true} 才执行（先自动全量备份到数据目录 backup/）
+app.post('/api/bot/rebalance', requireApiToken, async (req, res) => {
+  try {
+    const result = await scheduleService.rebalance({ confirm: !!req.body?.confirm });
+    res.json({ success: true, result });
+  } catch (err) {
+    console.error('[重排] 失败:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // 看板自动播报（与 12:00 cron 同一执行链；默认 dryRun 只预览，{"confirm":true} 才实发。
 // 人工当下触发不走静默闸门，与其它 test-* 口径一致）
 app.post('/api/bot/test-board', requireApiToken, async (req, res) => {

@@ -25,6 +25,8 @@ fs.writeFileSync(WHITELIST_FILE, JSON.stringify({ names: ['队员E'] }));
 
 process.env.PLAZA_BITABLE_TABLE_ID = ''; // 测试禁用动态广场写表（防污染生产表）
 process.env.QUIET_HOURS_DISABLED = '1';
+// 周插入容量调大（主流程兼容旧行为；K=2 的容量行为在 7.5 用纯函数直接测）
+process.env.DUTY_WEEKLY_INSERTION_ALLOWANCE = '10';
 process.env.DUTY_MEMBERS_FILE = MEMBERS_FILE;
 process.env.DUTY_WHITELIST_FILE = WHITELIST_FILE;
 process.env.DUTY_STATE_FILE = path.join(TMP, 'state.json');
@@ -61,6 +63,14 @@ require.cache[require.resolve('../src/feishu/bitable')] = {
       if (!r) throw new Error(`记录不存在: ${recordId}`);
       r.fields = { ...r.fields, ...fields };
       return {};
+    },
+    async batchDeleteRecords(recordIds) {
+      const deleted = [];
+      for (const id of recordIds) {
+        const idx = memory.records.findIndex((x) => x.record_id === id);
+        if (idx >= 0) { memory.records.splice(idx, 1); deleted.push(id); }
+      }
+      return deleted;
     },
     async listFields() { return []; },
   },
@@ -238,8 +248,8 @@ function check(desc, cond, detail = '') {
   check('队员D 请假第二步：已登记请假', leave.handled && leave.reply.includes('已登记请假'), leave.reply);
   const pendingOb = state.load().obligations.filter((o) => !o.placed);
   check('请假生成 1 条下周插入义务', pendingOb.length === 1 && pendingOb[0].name === '队员D', JSON.stringify(pendingOb));
-  // 补位（2026-09-12 口径）：请假日插入第 4 条记录（同岗、非请假人），并私信被抽调人。
-  // 从私信反查被抽调人再验证其当日同岗记录（当日可能存在早前插入的同岗记录，正向 find 会歧义）
+  // 补位已废除（2026-09-25 口径）：请假当日该岗空缺，不再抽人顶班——
+  // 该日记录数保持 3（1 条已请假 + 2 条正常），无第 4 条补位记录、无补位私信
   let dCanPlace = null; // 对账前快照：D 的义务能否就地安置（供步骤 7 断言用）
   let dLeaveWeekStart = null; // D 义务目标周起点（供步骤 7 顺延断言比对）
   {
@@ -247,22 +257,11 @@ function check(desc, cond, detail = '') {
     const all = await dutyTable.getAllDayRecords();
     const dLeave = all.find((r) => r.name === '队员D' && r.status === '已请假');
     const sameDay = all.filter((r) => r.dateStr === dLeave.dateStr);
-    // 结局二选一（均合法）：有候选 → 同岗抽调 + 回执说明 + 私信告知；
-    // 全队已在班（4 人队 + 插入日）→ 无可抽调，回执说明空缺并交管理员
-    const coverRecs = sameDay.filter((r) => r.name !== '队员D' && r.position === dLeave.position);
-    const allBusy = roster.getQueue().filter((m) => m.name !== '队员D').every((m) => sameDay.some((r) => r.name === m.name));
-    check('请假当日补位：同岗抽调成功，或全队已在班无可抽调',
-      coverRecs.length >= 1 || allBusy,
-      JSON.stringify({ leaveDate: dLeave.dateStr, position: dLeave.position, sameDay: sameDay.map((r) => [r.name, r.position, r.status]), allBusy }));
-    check('请假回执说明补位安排或空缺兜底',
-      leave.reply.includes('补位安排') || leave.reply.includes('暂无可抽调人选'), leave.reply);
-    const notice = memory.dmCalls.find((c) => c.text.includes('补位通知'));
-    const coverName = notice ? (roster.getMembers().find((m) => m.openId === notice.openId) || {}).name : null;
-    check('被抽调人收到补位私信（且确为当日同岗补位者）；无候选时无私信',
-      coverRecs.length >= 1
-        ? (Boolean(notice) && Boolean(coverName) && sameDay.some((r) => r.name === coverName && r.position === dLeave.position))
-        : notice === undefined,
-      JSON.stringify({ matched: notice && notice.openId, coverName, allBusy }));
+    check('请假当日空缺：该日无第 4 条补位记录', sameDay.length === 3,
+      JSON.stringify(sameDay.map((r) => [r.name, r.position, r.status])));
+    check('请假回执说明当日空缺', leave.reply.includes('空缺'), leave.reply);
+    check('请假不发送补位私信', !memory.dmCalls.some((c) => c.text.includes('补位通知')),
+      JSON.stringify(memory.dmCalls.map((c) => c.text.slice(0, 20))));
 
     // 目标周能否安置 D 的义务——快照必须取**对账前**：安置本身会占掉空位日，
     // 对账后再算会自相矛盾（该断言曾对真实日期敏感误报，2026-09-13 修正）
@@ -272,7 +271,7 @@ function check(desc, cond, detail = '') {
     const assignments = new Map();
     for (const r of all) {
       if (!assignments.has(r.dateStr)) assignments.set(r.dateStr, []);
-      assignments.get(r.dateStr).push({ name: r.name, position: r.position });
+      assignments.get(r.dateStr).push({ name: r.name, position: r.position, status: r.status });
     }
     dCanPlace = Boolean(algo.planInsertion({
       weekStartStr: weekStart, rangeStart: weekStart, rangeEnd: weekEnd,
@@ -331,17 +330,70 @@ function check(desc, cond, detail = '') {
     const m2 = compensation.handleAbsence('队员X', addDays(today, -1), '未做完');
     check('加罚口径：请假后首次未做完只算第1次', m2.created.length === 1 && !m2.penalty && m2.streak === 1, JSON.stringify(m2));
 
-    // 补位抽调按近期密度：近14天窗口（目标日前推14天）内班次少者优先——
-    // 构造 A（窗口内 1 班 + 远期班）与 B（窗口内 0 班 + 远期班）。
-    // target 取生成表（today+1~today+30）之外：target 日无人 busy、且只有 A/B
-    // 有 target 之后的班次（=唯一候选），C/D 不构成并列干扰
-    const target = addDays(today, 35);
-    await dutyTable.createDayRecords(addDays(today, 25), [{ member: roster.findByName('队员A'), position: '总负责' }]); // A 窗口内+1 班
-    await dutyTable.createDayRecords(addDays(target, 2), [{ member: roster.findByName('队员A'), position: '总负责' }]); // A 候选资格
-    await dutyTable.createDayRecords(addDays(target, 1), [{ member: roster.findByName('队员B'), position: '总负责' }]); // B 候选资格
-    const repl = await scheduleService.arrangeReplacement({ dateStr: target, position: '总负责', excludeName: '' });
-    check('补位密度：近期班次少者优先被抽调（选 B 非 A）', repl && repl.name === '队员B', JSON.stringify(repl && { picked: repl.name }));
-    check('补位密度：抽调写入目标日', Boolean((await dutyTable.getRecordsByDate(target)).some((r) => r.name === '队员B')));
+    // 请假空缺位优先（2026-09-25 检修）：planInsertion 对带 status 的快照优先填已请假空缺岗
+    {
+      const algo = require('../src/services/scheduleAlgo');
+      const monday = addDays(today, 7); // 任取一个目标周
+      const am = new Map();
+      am.set(monday, [{ name: '队员A', position: '总负责' }]);
+      am.set(addDays(monday, 1), [{ name: '队员B', position: '总负责', status: '已请假' }]); // 请假空缺位
+      const plan = algo.planInsertion({
+        weekStartStr: monday, rangeStart: monday, rangeEnd: addDays(monday, 6),
+        memberName: '队员C', assignments: am,
+      });
+      check('安置优先级：请假空缺位优先且同岗回填', plan && plan.fillLeave === true && plan.dateStr === addDays(monday, 1) && plan.position === '总负责', JSON.stringify(plan));
+
+      // 周级插入容量（K=2）：第 3 条非请假位插入必须留队
+      const gen = algo.generateSchedule({
+        members: [{ name: '队员A' }, { name: '队员B' }, { name: '队员C' }, { name: '队员D' }],
+        startDateStr: addDays(today, 7), days: 7, history: [],
+        insertions: [
+          { id: 'i1', name: '队员A', weekStartStr: monday },
+          { id: 'i2', name: '队员B', weekStartStr: monday },
+          { id: 'i3', name: '队员C', weekStartStr: monday },
+        ],
+        weeklyAllowance: 2, seedStr: 'cap-test',
+      });
+      check('周容量：K=2 时第 3 条义务留队不插入', gen.unplacedInsertions.length === 1 && gen.unplacedInsertions[0].name === '队员C',
+        JSON.stringify(gen.unplacedInsertions));
+      const insertedCount = gen.days.reduce((n, d) => n + d.items.filter((it) => it.isInsertion).length, 0);
+      check('周容量：实际插入仅 2 条', insertedCount === 2, String(insertedCount));
+    }
+
+    // rebalance（2026-09-25 检修）：未来未完成班次重排，历史与已定状态保留
+    {
+      // 构造一个未来 4 人日（模拟存量超员）
+      await dutyTable.createDayRecords(addDays(today, 10), [{ member: roster.findByName('队员C'), position: '总负责' }]);
+      const preview = await scheduleService.rebalance({});
+      check('重排预览：识别待删未完成班次', preview.dryRun && preview.deleteCount >= 4,
+        JSON.stringify({ deleteCount: preview.deleteCount }));
+      check('重排预览：未来保留的都是已定状态（已请假/未做完）',
+        preview.keptFuture.every((line) => line.includes('已请假') || line.includes('未做完')),
+        JSON.stringify(preview.keptFuture));
+      const done = await scheduleService.rebalance({ confirm: true, weeklyAllowance: 2 });
+      check('重排执行：备份+删除+重生成', !done.dryRun && done.deleteCount >= 4 && done.generated.recordCount > 80,
+        JSON.stringify({ deleteCount: done.deleteCount, generated: done.generated, backup: done.backupPath }));
+      const allAfter = await dutyTable.getAllDayRecords();
+      const futureDays = new Map();
+      for (const r of allAfter) {
+        if (r.dateStr > today) {
+          if (!futureDays.has(r.dateStr)) futureDays.set(r.dateStr, []);
+          futureDays.get(r.dateStr).push(r);
+        }
+      }
+      const overFive = [...futureDays.values()].filter((rs) => rs.length > 4);
+      check('重排后：未来无 5 人日', overFive.length === 0,
+        JSON.stringify(overFive.map((rs) => `${rs[0] && rs[0].dateStr}:${rs.length}`)));
+      const overThree = [...futureDays.entries()].filter(([, rs]) => rs.length > 3);
+      const overByWeek = new Map();
+      for (const [d] of overThree) {
+        const wk = mondayOf(d);
+        overByWeek.set(wk, (overByWeek.get(wk) || 0) + 1);
+      }
+      check('重排后：每周 4 人日不超过容量 K=2',
+        [...overByWeek.values()].every((n) => n <= 2),
+        JSON.stringify({ overThree: overThree.map(([d, rs]) => `${d}:${rs.length}`), byWeek: [...overByWeek.entries()] }));
+    }
   }
 
   // ---- 8. 值日助手指令 ----

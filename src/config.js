@@ -90,6 +90,10 @@ module.exports = {
   },
 
   generate: {
+    // 每周补偿/加罚「非请假位插入」的容量上限（2026-09-25 检修新增）：超过的义务自动
+    // 顺延下一周，防止欠账集中安置把一周插成天天 4 人（09-19~09-24 雪球即此因）。
+    // 填入「请假空缺位」的安置不占此容量（实际干活人数不变）。
+    weeklyInsertionAllowance: parseInt(process.env.DUTY_WEEKLY_INSERTION_ALLOWANCE || '2', 10),
     // 每次生成的跨度（日历月数，从最后一个已排日期的次日起）
     months: Math.max(1, parseInt(process.env.DUTY_GENERATE_MONTHS, 10) || 1),
     // 同一人两次值日的最小间隔天数（软约束，候选不足时自动放宽）

@@ -150,6 +150,16 @@ function computeDayStatus(records) {
   return config.dayStatusDone;
 }
 
+/** 全表原始记录（record_id + fields，重排备份用） */
+async function getAllRawRecords() {
+  return bitable.listAllRecords();
+}
+
+/** 批量删除记录（重排用，返回实际删除的 record_id） */
+async function batchDeleteRecords(recordIds) {
+  return bitable.batchDeleteRecords(recordIds);
+}
+
 module.exports = {
   fieldText,
   fieldAttachments,
@@ -157,6 +167,8 @@ module.exports = {
   getAllDayRecords,
   getRecordsByDate,
   getLastScheduledDateStr,
+  getAllRawRecords,
+  batchDeleteRecords,
   createDayRecords,
   setStatus,
   setDayStatus,

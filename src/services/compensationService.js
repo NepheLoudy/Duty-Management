@@ -147,12 +147,18 @@ async function placePending(options = {}) {
   }
   const active = pending.filter((o) => !expired.includes(o));
 
-  // 周内排班快照：每次就地插入后同步更新，避免同人同周的第二条义务算出同一天（加罚双插）
+  // 周内排班快照：每次就地插入后同步更新，避免同人同周的第二条义务算出同一天（加罚双插）。
+  // status 带上记录状态，供 planInsertion 判定「请假空缺位」（2026-09-25 检修口径）
   const assignments = new Map();
   for (const r of all) {
     if (!assignments.has(r.dateStr)) assignments.set(r.dateStr, []);
-    assignments.get(r.dateStr).push({ name: r.name, position: r.position });
+    assignments.get(r.dateStr).push({ name: r.name, position: r.position, status: r.status });
   }
+
+  // 周级插入容量（2026-09-25）：非请假位插入每周最多 weeklyInsertionAllowance 条，
+  // 超出顺延下一周——防止欠账集中安置把一周插成天天 4 人。填请假位不占容量。
+  const allowance = Number(config.generate?.weeklyInsertionAllowance) || 2;
+  const weeklyInserted = new Map(); // weekStart -> 已用非请假位插入数
 
   const placedIds = [];
   for (const o of active) {
@@ -189,6 +195,23 @@ async function placePending(options = {}) {
       deferred.push({ ...o, weekStart: nextWeekStart });
       continue;
     }
+    // 周容量闸门（非请假位）：本周插入额度用尽 → 顺延下一周
+    if (!plan.fillLeave && (weeklyInserted.get(o.weekStart) || 0) >= allowance) {
+      const nextWeekStart = addDays(o.weekStart, 7);
+      if (!dryRun) {
+        state.mutate((st) => {
+          for (const o2 of st.obligations) {
+            if (o2.id === o.id) {
+              o2.weekStart = nextWeekStart;
+              o2.deferCount = (o2.deferCount || 0) + 1;
+              o2.deferReason = 'weekly_allowance';
+            }
+          }
+        });
+      }
+      deferred.push({ ...o, weekStart: nextWeekStart });
+      continue;
+    }
     if (!dryRun) {
       const member = roster.findByName(o.name) || { name: o.name };
       await dutyTable.createDayRecords(plan.dateStr, [{ member, position: plan.position }]);
@@ -204,10 +227,12 @@ async function placePending(options = {}) {
             o2.placedAt = new Date().toISOString();
             o2.placedDate = plan.dateStr;
             o2.placedPosition = plan.position;
+            o2.placedFillLeave = Boolean(plan.fillLeave);
           }
         }
       });
     }
+    if (!plan.fillLeave) weeklyInserted.set(o.weekStart, (weeklyInserted.get(o.weekStart) || 0) + 1);
     placed.push({ ...o, plan });
   }
 

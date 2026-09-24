@@ -30,19 +30,23 @@ function collectPendingInsertions(stateData, rangeStart, rangeEnd) {
  * 生成排班表（值日助手「生成排班表」/ 管理接口触发）
  * @param {object} [options]
  * @param {boolean} [options.dryRun] 只生成预览，不写表、不动补偿义务
+ * @param {string} [options.startDateStr] 显式起始日（重排场景覆盖「最后已排日期次日」默认值）
+ * @param {string[]} [options.extraHistoryRecordIds] 额外计入配额反推的记录 ID（重排保留的
+ *   未来已请假/未做完记录：占配额避免同人同日重复排班，欠账由义务体系闭环）
  * @returns {{startDate, endDate, dayCount, recordCount, quotaReport, unplacedInsertions, preview}}
  */
 async function generate(options = {}) {
   const dryRun = Boolean(options.dryRun);
+  const extraIds = new Set(options.extraHistoryRecordIds || []);
 
   const allRecords = await dutyTable.getAllDayRecords();
   const lastDate = await dutyTable.getLastScheduledDateStr();
-  const startDate = lastDate ? addDays(lastDate, 1) : addDays(todayStr(), 1);
+  const startDate = options.startDateStr || (lastDate ? addDays(lastDate, 1) : addDays(todayStr(), 1));
   const endDate = addDays(monthAdd(startDate, config.generate.months), -1);
   const dayCount = diffDays(endDate, startDate) + 1;
 
   const history = allRecords
-    .filter((r) => r.dateStr < startDate && r.name && r.position)
+    .filter((r) => r.name && r.position && (r.dateStr < startDate || extraIds.has(r.recordId)))
     .map((r) => ({ name: r.name, position: r.position, date: r.dateStr }));
 
   const stateData = state.load();
@@ -66,6 +70,7 @@ async function generate(options = {}) {
     history,
     insertions,
     minIntervalDays: config.generate.minIntervalDays,
+    weeklyAllowance: options.weeklyAllowance != null ? options.weeklyAllowance : config.generate.weeklyInsertionAllowance,
     seedStr: `duty|${startDate}|${members.map((m) => m.name).join(',')}|${history.length}`,
   });
 
@@ -202,70 +207,102 @@ async function getNextDuty(memberName) {
 }
 
 /**
- * 请假当日补位：从「较远的排班」抽调一人顶上（2026-09-12 口径：请假必须有补位）。
- * 候选 = 值日队列成员（白名单排除后）中，在目标日之后仍有排班者；排除当日已有记录的人。
- * 排序：与空缺同岗者优先 → 近 14 天已值次数最少者优先（近期负担轻=真余量大）→ 姓名稳定序。
- * 近期密度口径（2026-09-24）：旧版按「远期班次最远」当余量，会把被补偿/加罚插入多班次的
- * 人反复选中——班越多越像"余量大"，惩罚滚成雪球。
- * 抽调是「加插」而非「对调」：被抽调者自己的远期班次保留。
- * 找不到候选返回 null（当日空缺，仍记下周补偿）。
- * @returns {{name, openId, position, dateStr, recordIds: Array} | null}
+ * 排班重排（2026-09-25 检修）：清理存量超员——删除「今天之后未完成」的班次记录，
+ * 保留历史与已定状态（已请假/未做完）记录，被删班次对应的补偿义务重置为未安置，
+ * 然后从明天起按算法重新生成（每天严格 3 人；请假空缺位由义务安置按新优先级回填）。
+ * 执行前把全表原始记录 JSON 备份到状态文件同级的 backup/ 目录。
+ * @param {object} [options]
+ * @param {boolean} [options.confirm] 默认 false=只预览；true 才真正删表重排
+ * @returns {object} 预览或执行结果（删除清单/义务重置/新生成概要）
  */
-async function arrangeReplacement({ dateStr, position, excludeName }) {
+async function rebalance(options = {}) {
+  const confirm = Boolean(options.confirm);
+  const today = todayStr();
   const all = await dutyTable.getAllDayRecords();
-  const queue = roster.getQueue();
-  const queueNames = new Set(queue.map((m) => m.name));
-  const busyOnDate = new Set(all.filter((r) => r.dateStr === dateStr).map((r) => r.name));
 
-  // 近 14 天（目标日前 14 天，不含目标日）各候选已值次数
-  const windowStart = addDays(dateStr, -13);
-  const recentCount = new Map();
-  for (const r of all) {
-    if (r.dateStr >= windowStart && r.dateStr < dateStr && queueNames.has(r.name) && r.position) {
-      recentCount.set(r.name, (recentCount.get(r.name) || 0) + 1);
-    }
+  // 划分：>today 且无状态 → 删除重排；其余保留（历史留痕、今天进行中、已请假/未做完事实）
+  const toDelete = all.filter((r) => r.dateStr > today && !r.status);
+  const kept = all.filter((r) => !toDelete.includes(r));
+  const deleteDates = new Set(toDelete.map((r) => r.dateStr));
+
+  // 义务重置：已安置但落点在被删日期上的 → 重置为未安置，随新排班重新安置
+  const s = state.load();
+  const resetOb = (s.obligations || []).filter(
+    (o) => o.placed && o.placedDate && deleteDates.has(o.placedDate)
+  );
+
+  const byDate = {};
+  for (const r of toDelete) {
+    (byDate[r.dateStr] = byDate[r.dateStr] || []).push(`${r.name}(${r.position})`);
   }
 
-  // 候选：目标日之后仍有排班（队列成员），并记是否担任过空缺岗位
-  const later = all.filter((r) => r.dateStr > dateStr && r.name && r.position);
-  const hasLater = new Set();
-  const hasPosition = new Set();
-  for (const r of later) {
-    if (!queueNames.has(r.name) || r.name === excludeName) continue;
-    hasLater.add(r.name);
-    if (r.position === position) hasPosition.add(r.name);
+  if (!confirm) {
+    return {
+      dryRun: true,
+      today,
+      deleteCount: toDelete.length,
+      deleteByDate: byDate,
+      keptCount: kept.length,
+      keptFuture: kept.filter((r) => r.dateStr > today).map((r) => `${r.dateStr} ${r.name}(${r.position},${r.status})`),
+      resetObligations: resetOb.map((o) => `${o.name} ${o.reason.slice(0, 16)} @${o.placedDate}`),
+    };
   }
 
-  const candidates = [...hasLater].filter((n) => !busyOnDate.has(n));
-  if (!candidates.length) return null;
-  candidates.sort((a, b) => {
-    const pa = hasPosition.has(a) ? 0 : 1;
-    const pb = hasPosition.has(b) ? 0 : 1;
-    if (pa !== pb) return pa - pb;
-    const ca = recentCount.get(a) || 0;
-    const cb = recentCount.get(b) || 0;
-    if (ca !== cb) return ca - cb;
-    return a < b ? -1 : 1;
-  });
+  // 1) 全表原始记录备份（重排不可逆动作前的完整快照）
+  const fs = require('fs');
+  const path = require('path');
+  const raw = await dutyTable.getAllRawRecords();
+  let backupPath;
+  try {
+    const backupDir = path.join(path.dirname(config.stateFile), 'backup');
+    fs.mkdirSync(backupDir, { recursive: true });
+    backupPath = path.join(backupDir, `rebalance-backup-${new Date().toISOString().replace(/[:.]/g, '-')}.json`);
+    fs.writeFileSync(backupPath, JSON.stringify({ exportedAt: new Date().toISOString(), records: raw }, null, 2));
+  } catch (err) {
+    throw new Error(`重排中止：备份写入失败（${err.message}）——不备份不删除`);
+  }
+  if (raw.length === 0) {
+    throw new Error('重排中止：全表读取为空，拒绝在空快照上执行删除');
+  }
 
-  const picked = candidates[0];
-  const member = roster.findByName(picked) || { name: picked };
-  const recordIds = await dutyTable.createDayRecords(dateStr, [{ member, position }]);
-  // 当日补位：立即开监听会话（2026-09-13）——18:30 之后才被抽调的人没有询问会话，
-  // 不开会话则打卡/传照片都被拒，收口反被记「未做完」并背上补偿义务
-  if (member.openId && dateStr === todayStr()) {
+  // 2) 删除待重排记录
+  await dutyTable.batchDeleteRecords(toDelete.map((r) => r.recordId));
+
+  // 3) 义务重置（placed → false，清安置痕迹；dutyDate<=today 的历史义务不动）
+  if (resetOb.length > 0) {
+    const resetIds = new Set(resetOb.map((o) => o.id));
     state.mutate((st) => {
-      st.sessions[member.openId] = {
-        date: dateStr,
-        recordId: recordIds[0],
-        name: member.name,
-        position,
-        askedAt: new Date().toISOString(),
-      };
+      for (const o of st.obligations) {
+        if (resetIds.has(o.id)) {
+          o.placed = false;
+          delete o.placedAt;
+          delete o.placedDate;
+          delete o.placedPosition;
+          delete o.placedFillLeave;
+        }
+      }
     });
   }
-  console.log(`[补位] ${dateStr} ${position} 空缺，已抽调 ${picked}（近14天已值 ${recentCount.get(picked) || 0} 次）补位`);
-  return { name: picked, openId: member.openId || '', position, dateStr, recordIds };
+
+  // 4) 从明天起重排：保留的未来已请假/未做完记录计入配额反推（占配额防同人同日重复排班）
+  const gen = await generate({
+    dryRun: false,
+    startDateStr: addDays(today, 1),
+    weeklyAllowance: options.weeklyAllowance,
+    extraHistoryRecordIds: kept.filter((r) => r.dateStr > today).map((r) => r.recordId),
+  });
+
+  console.log(`[重排] 删除 ${toDelete.length} 条未完成班次，重置 ${resetOb.length} 条义务，重新生成 ${gen.recordCount} 条（备份: ${backupPath}）`);
+  return {
+    dryRun: false,
+    today,
+    backupPath,
+    deleteCount: toDelete.length,
+    resetObligationCount: resetOb.length,
+    generated: { startDate: gen.startDate, endDate: gen.endDate, recordCount: gen.recordCount },
+    quotaReport: gen.quotaReport,
+    unplacedInsertions: gen.unplacedInsertions,
+  };
 }
 
 module.exports = {
@@ -274,5 +311,5 @@ module.exports = {
   getBrief,
   getNextDuty,
   collectPendingInsertions,
-  arrangeReplacement,
+  rebalance,
 };

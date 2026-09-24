@@ -3,7 +3,7 @@
 > 版本隔离单位 = 一次 `npm run push`（即一次 git 提交 + 一次部署）。
 > 每次 push 完成后在文末追加：`## vN · YYYY-MM-DD · <提交哈希> · <类型>`，
 > 正文为提交说明原文 + 实际改动要点。vN 只增不复用，历史条目不改写。
-> 当前最新：**v36**（2026-09-24，`7a7a361`）。上一版 v35（7816439，09-24 复查修复批）。
+> 当前最新：**v37**（2026-09-25，随本提交落地）。上一版 v36（7a7a361，09-24 值日公平性批）。
 
 
 
@@ -361,3 +361,17 @@
 - **联动**：pm-robot v111 同批同步 dutyPolicyService fallback 词形（duty-bot 失联兜底时新词形可放行）。
 - **测试**：stub-test-flow 重构请假场景为两步（第一步意向/表格无变化/取消→确认失效/第二步生效）+ 新增 7.5 小节（加罚口径 6 断言 + 补位密度 2 断言，置于对账后避免污染 brief 断言；target 取生成范围外 today+35 保证候选集确定）+ 新增 D-7 预告 3 断言；stub-test-policy p2p 清单断言 32→36 含新词形 4 词；全量 7 套 + pm duty-branch 全过。
 - **文档**：README（排班规则加罚/补位口径、定时任务表 D-7 行、值日助手指令节、API 表 test-week-remind）、dashboard/registry.js（duty commands+定时任务描述）、用户侧《机器人总成使用指南.html》（播报节奏+请假两步+时刻总表）、《机器人总成使用指南.md》（维护者手册同步）。
+
+
+### v37 · 2026-09-25 · 随本提交落地 · feat
+
+**值日体系全面检修：请假当日空缺 + 安置优先级重构 + 周插入容量 + 排班重排端点**
+
+- 提交说明：feat: 值日全面检修——请假当日空缺废补位+补偿安置请假空缺位优先+周插入容量防雪球+/api/bot/rebalance 重排清理存量超员
+- **背景**：用户拍板①「请假当日空缺」替代抽人补位；②检修「同一天 3 人以上值日」的存量超员（09-19~09-24 雪球产物：09-27/09-28 各 5 人，未来 20 天几乎天天 4 人）。
+- **①请假当日空缺**：废除 arrangeReplacement 补位抽调（函数删除）——被抽调者无准备无意愿烂尾率高（09-24 补位班全员未做完即此因），且抽调是加插推高当日人数。请假回执/HELP_TEXT/文档同步改空缺口径。
+- **②安置优先级重构**（scheduleAlgo.planInsertion）：补偿/加罚安置先找目标周内「请假空缺位」（某日某岗仅有已请假记录=实际空缺，同岗回填新记录，实际干活人数不变、不超员）；无请假位才落当周人数最少日（4 记录日，受容量约束）。placePending 快照带上 status 供判定。
+- **③周级插入容量**（DUTY_WEEKLY_INSERTION_ALLOWANCE，默认 2）：非请假位插入每周限 K 条，超出顺延下周（deferReason=weekly_allowance）；填请假位不占容量。placePending 与 generateSchedule 的义务安置同受约束——根除「欠账集中安置把一周插成天天 4 人」的雪球机制。
+- **④排班重排**（scheduleService.rebalance + POST /api/bot/rebalance）：清理「今天之后未完成」班次→义务重置（placed 落点被删的回退未安置）→从明天起重排（每天严格 3 人）；历史与已定状态（已请假/未做完）保留留痕并计入配额反推（占配额防同人同日重排）；执行前全表原始记录 JSON 自动备份到数据目录 backup/（不备份不删除）；默认 dryRun 预览、confirm=true 才执行。generate 支持显式 startDateStr/extraHistoryRecordIds/weeklyAllowance 覆盖（重排场景专用）。
+- **测试**：flow 重构——补位断言改「当日空缺无第 4 条/无补位私信」；新增 7.5 三组（planInsertion 请假位优先/周容量 K=2 第三条留队/rebalance 预览+执行+重排后每周 4 人日≤K）；bitable stub 补 batchDeleteRecords；主流程 env K=10 保旧断言稳定。全量 7 套过。
+- **文档**：README（排班规则四节重写+API 表 rebalance+.env.example）、registry、用户侧 HTML/MD。

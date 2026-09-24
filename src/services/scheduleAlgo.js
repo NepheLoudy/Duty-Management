@@ -86,23 +86,38 @@ function computeRemainingQuotas(members, history) {
 // ---------- 插入安置（单次，纯函数） ----------
 
 /**
- * 为一次补偿插入找安置点：目标周内该队员没有班次的「空位日」，
- * 岗位取当周各岗位计数最少的（保证插人后三岗位尽量均匀）；
- * 多个候选日取人最少的那天（摊薄负载），同人数取最早。
+ * 为一次补偿插入找安置点。
+ * 安置优先级（2026-09-25 检修口径）：
+ *   1. 目标周内的「请假空缺位」——某日某记录 status=已请假 且同日同岗无非请假记录：
+ *      填入同岗新记录，该日实际干活人数不变（请假记录留痕），不产生超员；
+ *   2. 无请假位 → 「空位日」（目标周内该队员没有班次的日子）按人数最少安置
+ *      （产生一个 4 记录日，由周级插入容量控制总量，见 placePending/generate 的配额）；
+ *   3. 同人数多候选按人名散列错开，岗位取当周各岗位计数最少（保证插入后三岗位尽量均匀）。
  * @param {object} p
  * @param {string} p.weekStartStr 目标自然周周一（自然周周一~周日）
  * @param {string} p.rangeStart 生成范围起点（可为周内）
  * @param {string} p.rangeEnd 生成范围终点（可为周内）
  * @param {string} p.memberName
- * @param {Map<string, Array<{name: string, position: string}>>} p.assignments 已排（含常规与其它插入）
- * @returns {{dateStr: string, position: string}|null}
+ * @param {Map<string, Array<{name: string, position: string, status?: string}>>} p.assignments 已排（含常规与其它插入；status 为表格记录状态，请假空缺位判定用）
+ * @returns {{dateStr: string, position: string, fillLeave: boolean}|null}
  */
 function planInsertion({ weekStartStr, rangeStart, rangeEnd, memberName, assignments }) {
   const first = weekStartStr > rangeStart ? weekStartStr : rangeStart;
   const last = addDays(weekStartStr, 6) < rangeEnd ? addDays(weekStartStr, 6) : rangeEnd;
   if (first > last) return null;
 
-  // 岗位计数覆盖整周（含本人已有班次日），保证插入后三岗位尽量均匀
+  // 1) 请假空缺位优先：同日同岗仅有已请假记录 = 该岗实际空缺
+  for (let d = first; d <= last; d = addDays(d, 1)) {
+    const items = assignments.get(d) || [];
+    if (items.some((it) => it.name === memberName)) continue; // 该日已有班次，跳过
+    for (const it of items) {
+      if (it.status === '已请假' && !items.some((o) => o.position === it.position && o.status !== '已请假')) {
+        return { dateStr: d, position: it.position, fillLeave: true };
+      }
+    }
+  }
+
+  // 2) 空位日按人数最少安置
   const posCount = { '总负责': 0, '工位区': 0, '装配区': 0 };
   const candidates = [];
   for (let d = first; d <= last; d = addDays(d, 1)) {
@@ -119,7 +134,7 @@ function planInsertion({ weekStartStr, rangeStart, rangeEnd, memberName, assignm
   const ties = candidates.filter((c) => c.people === minPeople);
   const dateStr = ties[hashSeed(memberName) % ties.length].dateStr;
   const position = POSITIONS.reduce((best, pos) => (posCount[pos] < posCount[best] ? pos : best), POSITIONS[0]);
-  return { dateStr, position };
+  return { dateStr, position, fillLeave: false };
 }
 
 // ---------- 常规排班生成 ----------
@@ -133,10 +148,11 @@ function planInsertion({ weekStartStr, rangeStart, rangeEnd, memberName, assignm
  * @param {Array<{name: string, position: string, date: string}>} p.history 起始日之前的既有班次（反推配额与间隔）
  * @param {Array<{name: string, weekStartStr: string}>} p.insertions 需优先安置的补偿插入（每条=1次）
  * @param {number} p.minIntervalDays 同一人两次值日最小间隔（软约束）
+ * @param {number} [p.weeklyAllowance] 每周非请假位插入容量（默认 2，超出留队）
  * @param {string} p.seedStr 随机种子（同参数可复现）
  * @returns {{days: Array<{date: string, items: Array<{name: string, position: string, isInsertion: boolean}>}>, unplacedInsertions: Array, quotaReport: Array}}
  */
-function generateSchedule({ members, startDateStr, days, history = [], insertions = [], minIntervalDays = 2, seedStr = 'duty' }) {
+function generateSchedule({ members, startDateStr, days, history = [], insertions = [], minIntervalDays = 2, weeklyAllowance, seedStr = 'duty' }) {
   const rng = mulberry32(hashSeed(seedStr));
   const assignments = new Map(); // dateStr -> [{name, position, isInsertion}]
   const unplacedInsertions = [];
@@ -156,6 +172,11 @@ function generateSchedule({ members, startDateStr, days, history = [], insertion
   const hasDutyOn = (name, date) => (assignments.get(date) || []).some((it) => it.name === name);
 
   // -- 1) 补偿插入优先安置（可突破轮次上限，该日变成 4 人） --
+  // 周级容量闸门（2026-09-25 检修）：非请假位插入每周最多 allowance 条，超出留队
+  // （unplacedInsertions，由 00:30 对账的 placePending 后续安置），防止欠账集中
+  // 插进生成范围头部把一周插成天天 4 人。生成场景 assignments 无 status → 无请假位。
+  const allowance = weeklyAllowance == null ? 2 : weeklyAllowance;
+  const weeklyInserted = new Map(); // weekStart -> 已用非请假位插入数
   for (const ins of insertions) {
     if (!quotas.has(ins.name)) {
       // 不在值日队列（如白名单成员）：补偿义务不豁免，进未安置队列留
@@ -174,6 +195,11 @@ function generateSchedule({ members, startDateStr, days, history = [], insertion
       unplacedInsertions.push(ins);
       continue;
     }
+    if (!plan.fillLeave && (weeklyInserted.get(ins.weekStartStr) || 0) >= allowance) {
+      unplacedInsertions.push(ins);
+      continue;
+    }
+    if (!plan.fillLeave) weeklyInserted.set(ins.weekStartStr, (weeklyInserted.get(ins.weekStartStr) || 0) + 1);
     getItems(plan.dateStr).push({ name: ins.name, position: plan.position, isInsertion: true });
     lastDuty.set(ins.name, plan.dateStr); // 插入也是一次值日，影响间隔约束
   }
