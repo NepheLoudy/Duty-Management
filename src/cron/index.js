@@ -9,6 +9,7 @@ const express = require('../services/expressService');
 // ============================================================
 // 定时任务（node-cron 6 段式 + Asia/Shanghai）：
 //   1. 次日提醒   DUTY_PREV_REMIND_SCHEDULE  (0 0 20 * * *,  D-1 20:00 私信明日队员)
+//   1.5 周预告   DUTY_WEEK_REMIND_SCHEDULE  (0 5 20 * * *,  D-7 20:05 私信一周后队员，2026-09-24 新增)
 //   2. 当日询问   DUTY_ASK_SCHEDULE          (0 30 18 * * *, D 日 18:30 私信询问，开启监听窗口)
 //   3. 收口       DUTY_DEADLINE_SCHEDULE     (0 0 0 * * *,   D 日 24:00（午夜）：置未做完/算总状态/生成补偿；
 //                                                 0 点已跨日，归属日期由 deadline runner 显式指定为 D 日)
@@ -17,7 +18,7 @@ const express = require('../services/expressService');
 //   5. 看板播报   DUTY_BOARD_BROADCAST_SCHEDULE (0 0 12 * * *, 每日 12:00 webhook 推今日值日看板)
 //
 // 晚间静默（02:00–09:00，Asia/Shanghai，可配）：
-//   - 次日提醒/当日询问/对账/看板播报为可重扫任务 → gateTask，窗口内登记积压，
+//   - 周预告/次日提醒/当日询问/对账/看板播报为可重扫任务 → gateTask，窗口内登记积压，
 //     冲刷时重跑整个任务函数（以补发时刻最新数据重查）；
 //   - 收口的写表动作不延迟（静默期语义），永远立即执行；只有收口回执通知
 //     属一次性事件通知 → gatePayload 落盘、窗口结束整点按序补发；
@@ -44,6 +45,7 @@ function startCronJobs() {
   // 静默积压冲刷执行器：与 cron 回调共用同一执行链（重跑整个任务函数）
   const quietTaskRunners = {
     duty_prev_remind: () => inquiry.sendPrevDayRemind(),
+    duty_week_remind: () => inquiry.sendWeekAheadRemind(),
     duty_ask: () => inquiry.askToday(),
     duty_lastcall: () => inquiry.sendLastCall(),
     duty_reconcile: () => compensation.reconcile(),
@@ -52,6 +54,8 @@ function startCronJobs() {
   };
 
   tasks.push(scheduleTask(config.schedule.prevRemind, 'duty_prev_remind', '次日值日提醒', quietTaskRunners.duty_prev_remind));
+  // D-7 值日预告（2026-09-24）：提前一周点名班次，可重扫任务过静默闸门
+  tasks.push(scheduleTask(config.schedule.weekRemind, 'duty_week_remind', '下周值日预告', quietTaskRunners.duty_week_remind));
   tasks.push(scheduleTask(config.schedule.ask, 'duty_ask', '当日值日询问', quietTaskRunners.duty_ask));
   tasks.push(scheduleTask(config.schedule.lastCall, 'duty_lastcall', '收口前临门提醒', quietTaskRunners.duty_lastcall));
   tasks.push(scheduleTask(config.schedule.reconcile, 'duty_reconcile', '值日对账', quietTaskRunners.duty_reconcile));
@@ -103,7 +107,7 @@ async function runClose(options = {}) {
   return result;
 }
 
-/** cron 状态（管理接口用）。任务数：6 个常规 + 1 个收口（快递播报加入后共 7，判 ≥6 容忍未来增减） */
+/** cron 状态（管理接口用）。任务数：7 个常规 + 1 个收口（周预告加入后共 8，判 ≥6 容忍未来增减） */
 function getCronStatus() {
   return {
     running: tasks.length >= 6,

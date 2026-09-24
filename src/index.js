@@ -167,6 +167,15 @@ app.post('/api/bot/test-remind', requireApiToken, async (req, res) => {
   }
 });
 
+// D-7 值日预告手动触发（2026-09-24；dryRun 只回预览）
+app.post('/api/bot/test-week-remind', requireApiToken, async (req, res) => {
+  try {
+    res.json({ success: true, result: await inquiry.sendWeekAheadRemind({ dryRun: !!req.body?.dryRun }) });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 app.post('/api/bot/test-ask', requireApiToken, async (req, res) => {
   try {
     res.json({ success: true, result: await inquiry.askToday({ dryRun: !!req.body?.dryRun }) });

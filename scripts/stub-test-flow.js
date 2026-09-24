@@ -220,9 +220,22 @@ function check(desc, cond, detail = '') {
   const fourDay = genReal.days.find((d) => d.items.length === 4);
   check('生成：出现 4 人插入日', Boolean(fourDay), JSON.stringify(genReal.days.slice(0, 3)));
 
-  // ---- 6. 请假（队员D 未来班次 → 已请假 + 新义务 + 当日抽调补位） ----
-  const leave = await inquiry.requestLeave(roster.findByName('队员D'));
-  check('队员D 请假成功', leave.handled && leave.reply.includes('已登记请假'), leave.reply);
+  // ---- 6. 请假（队员D 未来班次：两步确认 → 已请假 + 新义务 + 当日抽调补位） ----
+  // 2026-09-24 请假二次确认：requestLeave 只登记意向点名日期，confirmLeave 才生效
+  const leaveAsk = await inquiry.requestLeave(roster.findByName('队员D'));
+  check('队员D 请假第一步：确认会话点名日期', leaveAsk.handled && leaveAsk.reply.includes('请假确认') && leaveAsk.reply.includes('确认请假'), leaveAsk.reply);
+  check('请假第一步未生效（表格无已请假状态）',
+    (await dutyTable.getAllDayRecords()).every((r) => !(r.name === '队员D' && r.status === '已请假')));
+  check('请假第一步不生成义务', state.load().obligations.filter((o) => !o.placed).length === 0,
+    JSON.stringify(state.load().obligations.filter((o) => !o.placed)));
+  // 误触保护：取消 → 确认失效 → 重新发起 → 确认生效
+  const leaveCancel = await inquiry.cancelLeave('ou_test_d');
+  check('取消请假：回执已取消', leaveCancel.handled && leaveCancel.reply.includes('已取消'), leaveCancel.reply);
+  const leaveStale = await inquiry.confirmLeave('ou_test_d');
+  check('取消后确认：提示无待确认', leaveStale.handled && leaveStale.reply.includes('没有待确认的请假'), leaveStale.reply);
+  await inquiry.requestLeave(roster.findByName('队员D'));
+  const leave = await inquiry.confirmLeave('ou_test_d');
+  check('队员D 请假第二步：已登记请假', leave.handled && leave.reply.includes('已登记请假'), leave.reply);
   const pendingOb = state.load().obligations.filter((o) => !o.placed);
   check('请假生成 1 条下周插入义务', pendingOb.length === 1 && pendingOb[0].name === '队员D', JSON.stringify(pendingOb));
   // 补位（2026-09-12 口径）：请假日插入第 4 条记录（同岗、非请假人），并私信被抽调人。
@@ -295,6 +308,42 @@ function check(desc, cond, detail = '') {
     Boolean(cLeaveObl) && (cLeaveObl.placed || cLeaveObl.weekStart > dLeaveWeekStart),
     JSON.stringify(cLeaveObl));
 
+  // ---- 7.5 加罚口径 + 补位密度（2026-09-24，置于对账后避免新义务被安置干扰 brief 断言） ----
+  {
+    // 加罚只计「未做完」：连续两次未做完触发加罚（义务翻倍），请假不计数
+    const obBefore = state.load().obligations.length;
+    const a1 = compensation.handleAbsence('队员A', addDays(today, -2), '未做完');
+    check('加罚口径：未做完第1次不加罚', a1.created.length === 1 && !a1.penalty && a1.streak === 1, JSON.stringify(a1));
+    const a2 = compensation.handleAbsence('队员A', addDays(today, -1), '未做完');
+    check('加罚口径：未做完第2次触发加罚（义务2条+带标记）',
+      a2.created.length === 2 && a2.penalty && a2.created.some((c) => c.reason.includes('加罚')),
+      JSON.stringify(a2.created.map((c) => c.reason)));
+    check('加罚口径：连续未做完义务共 3 条（2+加罚1）', state.load().obligations.length === obBefore + 3);
+    // 请假不计数：连续请假两次不加罚、streak 原值不动（B 此前收口场景可能已有计数）
+    const bStreakBefore = (state.load().absenceStreaks['队员B'] || { count: 0 }).count;
+    const b1 = compensation.handleAbsence('队员B', addDays(today, -2), '已请假');
+    const b2 = compensation.handleAbsence('队员B', addDays(today, -1), '已请假');
+    check('加罚口径：连续请假两次各只1条义务、不加罚',
+      b1.created.length === 1 && b2.created.length === 1 && !b2.penalty,
+      JSON.stringify({ b1: b1.created.length, b2: b2.created.length, penalty: b2.penalty }));
+    check('加罚口径：请假不改变 streak（不计入）',
+      (state.load().absenceStreaks['队员B'] || { count: 0 }).count === bStreakBefore);
+    const m2 = compensation.handleAbsence('队员X', addDays(today, -1), '未做完');
+    check('加罚口径：请假后首次未做完只算第1次', m2.created.length === 1 && !m2.penalty && m2.streak === 1, JSON.stringify(m2));
+
+    // 补位抽调按近期密度：近14天窗口（目标日前推14天）内班次少者优先——
+    // 构造 A（窗口内 1 班 + 远期班）与 B（窗口内 0 班 + 远期班）。
+    // target 取生成表（today+1~today+30）之外：target 日无人 busy、且只有 A/B
+    // 有 target 之后的班次（=唯一候选），C/D 不构成并列干扰
+    const target = addDays(today, 35);
+    await dutyTable.createDayRecords(addDays(today, 25), [{ member: roster.findByName('队员A'), position: '总负责' }]); // A 窗口内+1 班
+    await dutyTable.createDayRecords(addDays(target, 2), [{ member: roster.findByName('队员A'), position: '总负责' }]); // A 候选资格
+    await dutyTable.createDayRecords(addDays(target, 1), [{ member: roster.findByName('队员B'), position: '总负责' }]); // B 候选资格
+    const repl = await scheduleService.arrangeReplacement({ dateStr: target, position: '总负责', excludeName: '' });
+    check('补位密度：近期班次少者优先被抽调（选 B 非 A）', repl && repl.name === '队员B', JSON.stringify(repl && { picked: repl.name }));
+    check('补位密度：抽调写入目标日', Boolean((await dutyTable.getRecordsByDate(target)).some((r) => r.name === '队员B')));
+  }
+
   // ---- 8. 值日助手指令 ----
   const help = await assistant.handleCommand({ command: '值日助手', openId: 'ou_test_a', chatType: 'p2p' });
   check('私信「值日助手」→ 用法说明', help.reply.includes('值日助手用法'));
@@ -327,6 +376,16 @@ function check(desc, cond, detail = '') {
   const brief = await scheduleService.getBrief();
   check('brief：昨日 1 人（对账补的记录）、今日 3 人', brief.yesterday.members.length === 1 && brief.today.members.length === 3, JSON.stringify(brief.today));
   check('brief：昨日 dayStatus=null（未完成口径）', brief.yesterday.dayStatus === null);
+
+  // ---- 10. D-7 值日预告（2026-09-24 新增） ----
+  const weekAhead = await inquiry.sendWeekAheadRemind({ dryRun: true });
+  check('D-7 预告：目标日=今天+7 且有班次可发',
+    weekAhead.date === addDays(today, 7) && weekAhead.sent.length > 0,
+    JSON.stringify({ date: weekAhead.date, sent: weekAhead.sent.length, skipped: weekAhead.skipped }));
+  check('D-7 预告：文案点名日期与岗位（dryRun 预览）',
+    weekAhead.sent.every((s) => s.preview.includes(weekAhead.date) && s.preview.includes(s.position)),
+    JSON.stringify(weekAhead.sent.map((s) => s.name)));
+  check('D-7 预告：请假引导指向两步确认', weekAhead.sent.every((s) => s.preview.includes('我要请假')));
 
   console.log(failed === 0 ? `\n全部通过 ✅（临时目录 ${TMP}）` : `\n${failed} 项失败 ❌`);
   process.exit(failed === 0 ? 0 : 1);

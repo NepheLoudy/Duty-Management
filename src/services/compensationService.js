@@ -14,7 +14,8 @@ const bot = require('../feishu/bot');
 //   · 下周未生成 → 义务进 .duty-state.json 排队，生成排班表时优先安置
 //   · 下周已生成但该队员当周天天有班（小队多条补偿同周）→ 顺延到再下一周
 //     （weekStart+7、deferCount 计数，对账报告可见；不再静默留队到过期）
-// - 加罚：同一人连续两次轮到自己没做完/请假 → 多加 1 次（该缺勤周期共 3 次）
+// - 加罚（2026-09-24 收紧口径）：同一人连续两次「未做完」→ 多加 1 次（该缺勤周期共 3 次）；
+//   主动请假不计入连续缺勤（合规安排不同罪，防止请假→加罚→班更多→更易被抽调的雪球）
 // - 00:30 对账：核对下周插入义务是否全部安置，未安置补插或顺延
 // ============================================================
 
@@ -23,7 +24,10 @@ function newId() {
 }
 
 /**
- * 登记一次缺勤：连续计数 +1，生成下周插入义务；连续满 2 次触发加罚（+1）后计数清零。
+ * 登记一次缺勤：生成下周插入义务。
+ * 加罚只计「未做完」（2026-09-24）：主动请假属合规安排（可提前查班、请假即有补位、
+ * 补偿总量守恒），不计入连续缺勤——否则一次请假翻倍成两次补偿，惩罚滚雪球
+ * （叠加补位抽调后会反复选中同一人）。连续两次「未做完」仍触发加罚（+1）后计数清零。
  * @param {string} memberName
  * @param {string} dutyDateStr 缺勤那次值日的日期（义务插到其所在自然周的下一周）
  * @param {string} reason 已请假 / 未做完
@@ -32,10 +36,6 @@ function newId() {
 function handleAbsence(memberName, dutyDateStr, reason) {
   const weekStart = addDays(mondayOf(dutyDateStr), 7);
   return state.mutate((s) => {
-    const streak = s.absenceStreaks[memberName] || { count: 0, lastDate: '' };
-    streak.count += 1;
-    streak.lastDate = dutyDateStr;
-
     const created = [{
       id: newId(),
       name: memberName,
@@ -46,22 +46,27 @@ function handleAbsence(memberName, dutyDateStr, reason) {
       createdAt: new Date().toISOString(),
     }];
     let penalty = false;
-    if (streak.count >= 2) {
-      created.push({
-        id: newId(),
-        name: memberName,
-        dutyDate: dutyDateStr,
-        weekStart,
-        reason: `${reason}（连续两次缺勤加罚）`,
-        placed: false,
-        createdAt: new Date().toISOString(),
-      });
-      penalty = true;
-      streak.count = 0;
+    if (reason === config.status.MISS) {
+      const streak = s.absenceStreaks[memberName] || { count: 0, lastDate: '' };
+      streak.count += 1;
+      streak.lastDate = dutyDateStr;
+      if (streak.count >= 2) {
+        created.push({
+          id: newId(),
+          name: memberName,
+          dutyDate: dutyDateStr,
+          weekStart,
+          reason: `${reason}（连续两次缺勤加罚）`,
+          placed: false,
+          createdAt: new Date().toISOString(),
+        });
+        penalty = true;
+        streak.count = 0;
+      }
+      s.absenceStreaks[memberName] = streak;
     }
-    s.absenceStreaks[memberName] = streak;
     s.obligations.push(...created);
-    return { created, penalty, streak: streak.count };
+    return { created, penalty, streak: (s.absenceStreaks[memberName] || { count: 0 }).count };
   });
 }
 

@@ -7,7 +7,8 @@ const config = require('../config');
 // - sessions：当日询问后的监听会话（谁被询问了、对应哪条记录）
 // - boards：群看板限流时间戳
 // - obligations：缺勤补偿插入义务（下周已生成则就地插入，未生成则排队等生成时优先安置）
-// - absenceStreaks：连续缺勤计数（连续两次触发加罚）
+// - absenceStreaks：连续缺勤计数（连续两次「未做完」触发加罚；请假不计入，2026-09-24）
+// - pendingLeaves：请假二次确认会话（防误触——请假直接生效会少一个班且牵动补位/补偿）
 // 生产环境必须把状态文件配到项目目录之外（SFTP 部署会清空 /opt/duty-bot）；
 // 配置目录不存在时自动回退项目根并告警，保证本地开发开箱能跑。
 // ============================================================
@@ -22,6 +23,7 @@ function emptyState() {
     boards: {},         // chatId -> lastBoardAt(ms)
     obligations: [],    // { id, name, weekStart, reason, placed, placedAt, recordId, createdAt }
     absenceStreaks: {}, // name -> { count, lastDate }
+    pendingLeaves: {},  // openId -> { recordId, dateStr, position, name, askedAt }（请假二次确认，2026-09-24）
   };
 }
 

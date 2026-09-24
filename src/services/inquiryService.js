@@ -73,6 +73,48 @@ async function sendPrevDayRemind(options = {}) {
 }
 
 /**
+ * D-7 20:05 值日预告（2026-09-24 新增）：私信一周后的当日值日队员。
+ * 动机：被补偿/加罚插入的班次队员往往临近才发现自己有班（临时请假牵动补位），
+ * 提前一周点名，留足请假/换安排的余量。预告不带打卡指引（D-1 20:00 次日提醒再发详细版）。
+ * @returns {{date, sent: number, skipped: Array, preview: Array}}
+ */
+async function sendWeekAheadRemind(options = {}) {
+  const dryRun = Boolean(options.dryRun);
+  const date = addDays(todayStr(), 7);
+  const recs = await dutyTable.getRecordsByDate(date);
+
+  const sent = [];
+  const skipped = [];
+  for (const rec of recs) {
+    if (rec.status) { skipped.push({ name: rec.name, reason: `状态已是「${rec.status}」` }); continue; }
+    const member = roster.findByName(rec.name);
+    if (!member || !member.openId) {
+      skipped.push({ name: rec.name || '（未绑定）', reason: '未绑定账号' });
+      continue;
+    }
+    const text = [
+      `📅 值日预告：一周后（${date}）是你的值日日，岗位【${rec.position}】`,
+      `职责：${positionDutyText(rec.position)}`,
+      '',
+      '提前留意当天的时间安排；如需请假，届时回复「我要请假」即可（会安排补位，下周自动补一次值日）。',
+    ].join('\n');
+    if (dryRun) {
+      sent.push({ name: member.name, position: rec.position, preview: text });
+    } else {
+      try {
+        await bot.sendTextToUser(member.openId, text);
+        sent.push({ name: member.name, position: rec.position });
+      } catch (err) {
+        skipped.push({ name: member.name, reason: `预告发送失败: ${err.message}` });
+        console.error(`[预告] ${member.name} 发送失败:`, err.message);
+      }
+    }
+  }
+
+  return { date, sent, skipped, preview: sent.map((s) => `${s.name}（${s.position}）`) };
+}
+
+/**
  * D 日 18:30 当日询问：私信当日未完结队员，开启监听会话
  * @returns {{date, asked: number, skipped: Array, preview: Array}}
  */
@@ -366,14 +408,88 @@ function withLeaveLock(fn) {
   return task;
 }
 
-async function requestLeave(member) {
-  return withLeaveLock(() => requestLeaveLocked(member));
+// 请假二次确认（2026-09-24）：「我要请假」只登记意向，回执点名日期，
+// 回复「确认请假」才真正生效——旧版直取最近班次立即置请假，误触一次就少一个班
+// 且牵动补位/补偿，无法撤回。确认会话惰性过期（不设定时器，下一次交互时校验）。
+const PENDING_LEAVE_TTL_MS = 10 * 60 * 1000;
+
+function pendingLeaveOf(openId) {
+  const pending = state.load().pendingLeaves?.[openId];
+  if (!pending) return null;
+  if (Date.now() - Date.parse(pending.askedAt) > PENDING_LEAVE_TTL_MS) return null;
+  return pending;
 }
 
-async function requestLeaveLocked(member) {
+/** 「我要请假」第一步：登记请假意向（记录点名日期），等待「确认请假」 */
+async function requestLeave(member) {
   const today = todayStr();
   const all = await dutyTable.getAllDayRecords();
   const rec = all.find((r) => r.name === member.name && r.dateStr >= today && !r.status);
+  if (!rec) {
+    return { handled: true, reply: '近期没有待完成的值日安排，无需请假。发「值日助手」可查询排班。' };
+  }
+  state.mutate((s) => {
+    s.pendingLeaves = s.pendingLeaves || {};
+    s.pendingLeaves[member.openId] = {
+      recordId: rec.recordId,
+      dateStr: rec.dateStr,
+      position: rec.position,
+      name: member.name,
+      askedAt: new Date().toISOString(),
+    };
+  });
+  return {
+    handled: true,
+    reply: [
+      `🗓 请假确认：你将于 ${rec.dateStr}（${rec.position}）值日。`,
+      '确认请假请回复「确认请假」（10 分钟内有效）；误触请回复「取消请假」。',
+      '确认后：当次置已请假，当日由其他队员补位，下周自动补插一次值日。',
+    ].join('\n'),
+  };
+}
+
+/** 「确认请假」第二步：按确认会话里的记录执行请假（原请假链路） */
+function confirmLeave(openId) {
+  const pending = pendingLeaveOf(openId);
+  if (!pending) {
+    return { handled: true, reply: '没有待确认的请假。要请假请先发「我要请假」，再回复「确认请假」生效。' };
+  }
+  return withLeaveLock(async () => {
+    const all = await dutyTable.getAllDayRecords();
+    const rec = all.find((r) => r.recordId === pending.recordId);
+    if (!rec || rec.status) {
+      state.mutate((s) => { if (s.pendingLeaves) delete s.pendingLeaves[openId]; });
+      const next = all.find((r) => r.name === pending.name && r.dateStr >= todayStr() && !r.status);
+      return {
+        handled: true,
+        reply: next
+          ? `该班次（${pending.dateStr}）已有状态或已变更，未执行请假。你近期还有 ${next.dateStr}（${next.position}）待完成，如需请假请重新发「我要请假」。`
+          : '该班次已有状态或已变更，未执行请假。近期没有其他待完成的值日安排。',
+      };
+    }
+    state.mutate((s) => { if (s.pendingLeaves) delete s.pendingLeaves[openId]; });
+    return requestLeaveLocked({ name: pending.name, openId, recordId: rec.recordId });
+  });
+}
+
+/** 「取消请假」：丢弃确认会话，班次不受影响 */
+function cancelLeave(openId) {
+  const had = Boolean(pendingLeaveOf(openId));
+  state.mutate((s) => { if (s.pendingLeaves) delete s.pendingLeaves[openId]; });
+  return {
+    handled: true,
+    reply: had
+      ? '已取消请假，你的值日安排不变。'
+      : '没有待确认的请假。要请假请先发「我要请假」。',
+  };
+}
+
+async function requestLeaveLocked(member, knownRecordId) {
+  const today = todayStr();
+  const all = await dutyTable.getAllDayRecords();
+  const rec = knownRecordId
+    ? all.find((r) => r.recordId === knownRecordId)
+    : all.find((r) => r.name === member.name && r.dateStr >= today && !r.status);
   if (!rec) {
     return { handled: true, reply: '近期没有待完成的值日安排，无需请假。发「值日助手」可查询排班。' };
   }
@@ -442,6 +558,7 @@ async function sendCloseNotifications(notifications) {
 module.exports = {
   positionDutyText,
   sendPrevDayRemind,
+  sendWeekAheadRemind,
   sendLastCall,
   askToday,
   handleYes,
@@ -450,5 +567,7 @@ module.exports = {
   handleImage,
   closeToday,
   requestLeave,
+  confirmLeave,
+  cancelLeave,
   sendCloseNotifications,
 };

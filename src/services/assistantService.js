@@ -26,7 +26,7 @@ const express = require('./expressService');
 const HELP_TEXT = [
   '🧹 值日助手用法（指令带不带 / 都可以）：',
   '· 「查询我的下一次值日」—— 下次值日日期与岗位',
-  '· 「我要请假」—— 登记请假（当次置已请假，机器人会从较远的排班抽调一人当日补位并私信告知；下周仍自动补插一次值日）',
+  '· 「我要请假」—— 请假分两步：先发「我要请假」，机器人点名班次日期，回复「确认请假」才生效（10 分钟内有效，误触回「取消请假」）；生效后当次置已请假，当日由其他队员补位，下周仍自动补插一次值日',
   '· 「绑定 姓名」—— 首次使用绑定账号（提醒与确认走私信）',
   '· 「打卡」—— 值日日 18:30 询问后回复它完成打卡（口语「是的」「完成了」也可；照片可直接发我，24:00（午夜）收口）；「否」= 今天不做了',
   '· 「生成排班表」—— 管理员专用，按日历向下生成一个月排班',
@@ -249,6 +249,21 @@ async function handleCommand(payload = {}) {
         return { handled: true, reply: '未识别到你的账号。请先发「绑定 姓名」完成绑定，再请假。' };
       }
       return inquiry.requestLeave(member);
+    }
+
+    // 请假二次确认（2026-09-24）：「我要请假」只登记意向，「确认请假」才生效
+    case '确认请假': {
+      if (!member) {
+        return { handled: true, reply: '未识别到你的账号。请先发「绑定 姓名」完成绑定，再请假。' };
+      }
+      return inquiry.confirmLeave(openId);
+    }
+
+    case '取消请假': {
+      if (!member) {
+        return { handled: true, reply: '未识别到你的账号。请先发「绑定 姓名」完成绑定。' };
+      }
+      return inquiry.cancelLeave(openId);
     }
 
     case '查询我的下一次值日': {

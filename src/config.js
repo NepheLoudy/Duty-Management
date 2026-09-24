@@ -75,6 +75,9 @@ module.exports = {
 
   schedule: {
     prevRemind: process.env.DUTY_PREV_REMIND_SCHEDULE || '0 0 20 * * *',
+    // D-7 值日预告（2026-09-24 新增）：提前一周私信点名班次，留足请假余量；
+    // 20:05 与次日提醒（20:00）错峰
+    weekRemind: process.env.DUTY_WEEK_REMIND_SCHEDULE || '0 5 20 * * *',
     ask: process.env.DUTY_ASK_SCHEDULE || '0 30 18 * * *',
     // 收口前 1 小时临门提醒（2026-09-16 新增；2026-09-17 随收口推迟到 23:00）
     lastCall: process.env.DUTY_LASTCALL_SCHEDULE || '0 0 23 * * *',

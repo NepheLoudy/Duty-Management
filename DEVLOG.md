@@ -3,7 +3,7 @@
 > 版本隔离单位 = 一次 `npm run push`（即一次 git 提交 + 一次部署）。
 > 每次 push 完成后在文末追加：`## vN · YYYY-MM-DD · <提交哈希> · <类型>`，
 > 正文为提交说明原文 + 实际改动要点。vN 只增不复用，历史条目不改写。
-> 当前最新：**v35**（2026-09-24，随本提交落地）。上一版 v34（09-20 动态广场停写批）。
+> 当前最新：**v36**（2026-09-24，随本提交落地）。上一版 v35（7816439，09-24 复查修复批）。
 
 
 
@@ -338,7 +338,7 @@
 - 值日完成/值日请假两处广场钩子保留代码不动（fire-and-forget 语义不变），仅由开关关断；`.env.example` 补注释。
 - 测试：flow/express 套件全过。
 
-### v35 · 2026-09-24 · 随本提交落地 · fix
+### v35 · 2026-09-24 · 7816439 · fix
 
 **复查修复批：快递图片窗口守卫 + 排班补偿义务即时落账（附 09-22 文档回填入库）**
 
@@ -347,3 +347,17 @@
 - **排班补偿义务 placed 逐日即时标记（P2）**：generate 原在全部写表完成后统一标记 placed——约 30 次 batchCreate 中途抛错时已写日未落账，重试生成会把未标记义务二次安置成双倍插入。改为逐日写表成功即按 isInsertion 定向 mutate（placePending v32 同款防御）。
 - **测试**：新增 scripts/stub-test-generate-place.js（可控失败写表桩：中断后 placed 与已写日一致 / 重试只安置一次，4 断言，旧代码必红）；stub-test-express 补图片窗口三断言（29→32）；push 闸门与 package.json 补至全量 7 套；README 测试节补 express/generate-place。
 - **文档回填（09-22 遗留批随本提交入库）**：.env.example（LASTCALL 23:00 / DEADLINE 0:00 对齐代码默认 + 状态文件路径勘误）、AGENTS.md（定时链时刻 + 快递域联动契约 + M4 口径）、README（test-* 语义拆行 + 部署路径勘误）。
+
+### v36 · 2026-09-24 · 随本提交落地 · feat
+
+**值日公平性修复批：请假不再触发加罚 + 补位按近期密度 + 请假两步确认 + D-7 值日预告**
+
+- 提交说明：feat: 值日公平性批——加罚只计未做完+补位近14天密度选人+请假两步确认+D-7值日预告（pm v111 fallback 词形同批）
+- **背景**：排查「某队员被排 7 次（全员第一，中位 2）」发现惩罚雪球：一次请假 12 秒内触发「连续两次缺勤加罚」被翻倍成两条补偿；加罚插入的班次又使其成为补位抽调「远期班次最远」的第一候选（多班=假余量），补位再+1。机器无错账（108 条记录逐条对账+义务账本+日志三边互证），是三条规则叠加的系统性挤压。
+- **①加罚只计「未做完」**（compensationService.handleAbsence）：主动请假不计入连续缺勤（合规安排——可提前查班、请假即有补位、补偿总量守恒——不同罪）；连续两次「未做完」仍加罚。请求回执的加罚提示行保留（penalty 恒 false，规则恢复时零改动）。
+- **②补位选人改近期密度**（scheduleService.arrangeReplacement）：排序第二键从「远期排班日最远（假余量）」改为「近 14 天（目标日前推）已值次数最少（真负担轻）」；同岗优先与姓名稳定序不变；日志同步改「近14天已值 N 次」。
+- **③请假两步确认**（inquiryService + assistantService + policyService + stateStore）：「我要请假」只登记意向（pendingLeaves，10 分钟惰性过期）并点名班次日期，「确认请假」才走原请假链路（按 recordId 精确执行，期间班次已变更则拒绝并指引重新发起），「取消请假」撤销——旧版直取最近班次立即置请假，误触一次就少一个班且牵动补位/补偿不可撤回。新词形 4 个（确认请假/取消请假 + 斜杠变体）进 p2pCommands（hub 直传放行依据）。
+- **④D-7 值日预告**（inquiryService.sendWeekAheadRemind + config.schedule.weekRemind + cron duty_week_remind + /api/bot/test-week-remind）：每日 20:05（DUTY_WEEK_REMIND_SCHEDULE 可配）私信一周后的当日值日队员（岗位+职责+请假引导）；可重扫任务过静默闸门；动机=补偿/插入班次往往临近才发现，提前点名留足请假余量。
+- **联动**：pm-robot v111 同批同步 dutyPolicyService fallback 词形（duty-bot 失联兜底时新词形可放行）。
+- **测试**：stub-test-flow 重构请假场景为两步（第一步意向/表格无变化/取消→确认失效/第二步生效）+ 新增 7.5 小节（加罚口径 6 断言 + 补位密度 2 断言，置于对账后避免污染 brief 断言；target 取生成范围外 today+35 保证候选集确定）+ 新增 D-7 预告 3 断言；stub-test-policy p2p 清单断言 32→36 含新词形 4 词；全量 7 套 + pm duty-branch 全过。
+- **文档**：README（排班规则加罚/补位口径、定时任务表 D-7 行、值日助手指令节、API 表 test-week-remind）、dashboard/registry.js（duty commands+定时任务描述）、用户侧《机器人总成使用指南.html》（播报节奏+请假两步+时刻总表）、《机器人总成使用指南.md》（维护者手册同步）。

@@ -202,11 +202,13 @@ async function getNextDuty(memberName) {
 }
 
 /**
- * 请假当日补位：从「更远的排班」抽调一人顶上（2026-09-12 口径：请假必须有补位）。
+ * 请假当日补位：从「较远的排班」抽调一人顶上（2026-09-12 口径：请假必须有补位）。
  * 候选 = 值日队列成员（白名单排除后）中，在目标日之后仍有排班者；排除当日已有记录的人。
- * 排序：与空缺同岗者优先 → 其排班日距目标日最远者优先（远一点的人余量最大）→ 姓名稳定序。
- * 抽调是「加插」而非「对调」：被抽调者自己的远期班次保留，其今日多出的一次由
- * 请假人的下周补偿义务在总量上对冲。找不到候选返回 null（当日空缺，仍记下周补偿）。
+ * 排序：与空缺同岗者优先 → 近 14 天已值次数最少者优先（近期负担轻=真余量大）→ 姓名稳定序。
+ * 近期密度口径（2026-09-24）：旧版按「远期班次最远」当余量，会把被补偿/加罚插入多班次的
+ * 人反复选中——班越多越像"余量大"，惩罚滚成雪球。
+ * 抽调是「加插」而非「对调」：被抽调者自己的远期班次保留。
+ * 找不到候选返回 null（当日空缺，仍记下周补偿）。
  * @returns {{name, openId, position, dateStr, recordIds: Array} | null}
  */
 async function arrangeReplacement({ dateStr, position, excludeName }) {
@@ -215,23 +217,34 @@ async function arrangeReplacement({ dateStr, position, excludeName }) {
   const queueNames = new Set(queue.map((m) => m.name));
   const busyOnDate = new Set(all.filter((r) => r.dateStr === dateStr).map((r) => r.name));
 
-  // 每个候选记其「最远的排班日」与是否担任过空缺岗位
+  // 近 14 天（目标日前 14 天，不含目标日）各候选已值次数
+  const windowStart = addDays(dateStr, -13);
+  const recentCount = new Map();
+  for (const r of all) {
+    if (r.dateStr >= windowStart && r.dateStr < dateStr && queueNames.has(r.name) && r.position) {
+      recentCount.set(r.name, (recentCount.get(r.name) || 0) + 1);
+    }
+  }
+
+  // 候选：目标日之后仍有排班（队列成员），并记是否担任过空缺岗位
   const later = all.filter((r) => r.dateStr > dateStr && r.name && r.position);
-  const farthest = new Map();
+  const hasLater = new Set();
   const hasPosition = new Set();
   for (const r of later) {
     if (!queueNames.has(r.name) || r.name === excludeName) continue;
-    if (!farthest.has(r.name) || r.dateStr > farthest.get(r.name)) farthest.set(r.name, r.dateStr);
+    hasLater.add(r.name);
     if (r.position === position) hasPosition.add(r.name);
   }
 
-  const candidates = [...farthest.keys()].filter((n) => !busyOnDate.has(n));
+  const candidates = [...hasLater].filter((n) => !busyOnDate.has(n));
   if (!candidates.length) return null;
   candidates.sort((a, b) => {
     const pa = hasPosition.has(a) ? 0 : 1;
     const pb = hasPosition.has(b) ? 0 : 1;
     if (pa !== pb) return pa - pb;
-    if (farthest.get(a) !== farthest.get(b)) return farthest.get(a) < farthest.get(b) ? 1 : -1;
+    const ca = recentCount.get(a) || 0;
+    const cb = recentCount.get(b) || 0;
+    if (ca !== cb) return ca - cb;
     return a < b ? -1 : 1;
   });
 
@@ -251,7 +264,7 @@ async function arrangeReplacement({ dateStr, position, excludeName }) {
       };
     });
   }
-  console.log(`[补位] ${dateStr} ${position} 空缺，已抽调 ${picked}（远期班次 ${farthest.get(picked)}）补位`);
+  console.log(`[补位] ${dateStr} ${position} 空缺，已抽调 ${picked}（近14天已值 ${recentCount.get(picked) || 0} 次）补位`);
   return { name: picked, openId: member.openId || '', position, dateStr, recordIds };
 }
 
