@@ -224,7 +224,7 @@ function check(desc, cond, detail = '') {
   const genReal = await scheduleService.generate({});
   check('生成：正式落表 >80 条记录', (await dutyTable.getAllDayRecords()).length > 80);
   check('生成：dryRun 与正式的配额核对行数一致（队列 4 人）', genReal.quotaReport.length === 4);
-  check('生成：补偿插入全部安置', state.load().obligations.every((o) => o.placed), JSON.stringify(state.load().obligations));
+  check('生成：补偿插入全部安置（含 placedDate，rebalance 重置依赖它）', state.load().obligations.every((o) => o.placed && o.placedDate), JSON.stringify(state.load().obligations.map((o) => [o.name, o.placed, o.placedDate])));
 
   // 插入日应为 4 人（某岗两人）
   const fourDay = genReal.days.find((d) => d.items.length === 4);
@@ -427,9 +427,11 @@ function check(desc, cond, detail = '') {
   const second = await assistant.handleCommand({ command: '值日助手', openId: 'ou_test_a', chatType: 'group', chatId: 'oc_test' });
   check('群看板：发送 1 次卡，第二次命中限流静默', memory.cards.length === 1 && second.rateLimited === true);
 
-  // 收口回执通知（手动触发 = 不受静默限制，直接发送）
-  await inquiry.sendCloseNotifications({ photoOnly: [{ name: '队员B', openId: 'ou_test_b' }], adminText: '测试摘要' });
-  check('收口回执：photoOnly 提醒 + 管理员摘要均发出', memory.dmCalls.some((c) => c.openId === 'ou_test_b' && c.text.includes('未做完')) && memory.dmCalls.some((c) => c.text === '测试摘要'));
+  // 收口回执通知（手动触发 = 不受静默限制，直接发送）；
+  // 载荷走生产契约 missNotices（photos:true 命中「有照片未答是」专用文案）——
+  // 旧 photoOnly 回退已删，photoOnly 元素无 photos 字段会发错文案
+  await inquiry.sendCloseNotifications({ missNotices: [{ name: '队员B', openId: 'ou_test_b', photos: true }], adminText: '测试摘要' });
+  check('收口回执：有照片未答是提醒（missNotices.photos 分支）+ 管理员摘要均发出', memory.dmCalls.some((c) => c.openId === 'ou_test_b' && c.text.includes('未做完') && c.text.includes('打卡')) && memory.dmCalls.some((c) => c.text === '测试摘要'));
 
   // ---- 9. brief 数据接口 ----
   const brief = await scheduleService.getBrief();

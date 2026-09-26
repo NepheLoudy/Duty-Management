@@ -315,6 +315,13 @@ async function reconcile(options = {}) {
   // 5) 补偿义务安置
   const { placed, stillQueued, deferred, expired } = await placePending({ dryRun });
 
+  // 顺延原因分别计数展示（deferReason：空=当周该队员天天有班 / 'weekly_allowance'=周插入
+  // 容量已满）——混合时只报一种会把 weekly_allowance 吞掉
+  const deferredFullWeek = deferred.filter((d) => d.deferReason !== 'weekly_allowance');
+  const deferredAllowance = deferred.filter((d) => d.deferReason === 'weekly_allowance');
+  const deferReasonParts = [];
+  if (deferredFullWeek.length > 0) deferReasonParts.push(`当周该队员天天有班 ${deferredFullWeek.length} 条`);
+  if (deferredAllowance.length > 0) deferReasonParts.push(`当周插入容量已满 ${deferredAllowance.length} 条`);
   const lines = [
     `🧹 值日对账（${yesterday}）`,
     `- 昨日总状态：${recs.length === 0 ? '无记录' : target || '未完成（保持为空）'}${dayStatusChanged ? '（已按表格实况修正）' : ''}`,
@@ -322,7 +329,7 @@ async function reconcile(options = {}) {
   for (const b of backfilled) {
     lines.push(`- ⚠️ 补收口 ${b.date}：${b.count} 人未确认已置未做完（${b.names.join('、')}），补偿义务已登记`);
   }
-  lines.push(`- 补偿插入：本次安置 ${placed.length} 条，排队中 ${stillQueued.length} 条${deferred.length ? `，顺延 ${deferred.length} 条（${deferred.some((d) => d.deferReason === 'weekly_allowance') ? '含当周插入容量已满' : '当周该队员天天有班'}，自动顺延下一周）` : ''}${expired.length ? `，过期标记 ${expired.length} 条（目标周已过去，请人工裁决）` : ''}${syncedCount ? `，补登记 ${syncedCount} 条（表格手工标记的请假/未做完）` : ''}`);
+  lines.push(`- 补偿插入：本次安置 ${placed.length} 条，排队中 ${stillQueued.length} 条${deferred.length ? `，顺延 ${deferred.length} 条（${deferReasonParts.join('、')}，自动顺延下一周）` : ''}${expired.length ? `，过期标记 ${expired.length} 条（目标周已过去，请人工裁决）` : ''}${syncedCount ? `，补登记 ${syncedCount} 条（表格手工标记的请假/未做完）` : ''}`);
   for (const p of placed) {
     lines.push(`  · ${p.name} → ${p.plan.dateStr} ${p.plan.position}（${p.reason}）`);
   }

@@ -195,6 +195,7 @@ async function deployCode(sftp, plan) {
       '--exclude=.env',
       '--exclude=config/members.json',
       '--exclude=config/whitelist.json',
+      '--exclude=config/policy-override.json',
       '--exclude=.duty-state.json',
       '--exclude=.quiet-backlog.json',
       '--exclude=logs',
@@ -276,6 +277,15 @@ function planPrivateConfig(sftp, i, plan, done) {
   const f = PRIVATE_CONFIG_FILES[i];
   const remotePath = REMOTE_DIR_WIN + '/' + f;
   sftp.readFile(remotePath, 'utf8', (readErr, remoteContent) => {
+    if (readErr && readErr.code !== 'ENOENT') {
+      // 读现网失败 ≠ 现网为空：把其他错误也当「远端为空」会让备份+条数守卫整体
+      // 失效（2026-09-12 白名单事故的变种路径）。只有 ENOENT（远端无此文件）按空
+      // 处理，其余一律中止部署，人工确认现网状态后再推。
+      console.error(`[私有配置保护] 读取现网 ${f} 失败（${readErr.code || '无错误码'} ${readErr.message}），无法确认现网内容，中止部署。`);
+      console.error('  请人工检查部署目标上该文件的可读性/网络后重跑；本中止不受 PUSH_FORCE_PRIVATE 影响。');
+      conn.end();
+      process.exit(1);
+    }
     const hasLocal = fs.existsSync(path.join(__dirname, f));
     const localContent = hasLocal ? fs.readFileSync(path.join(__dirname, f), 'utf8') : '';
     const remoteCount = readErr ? 0 : countEntries(remoteContent);

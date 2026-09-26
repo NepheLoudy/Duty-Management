@@ -8,7 +8,8 @@ const path = require('path');
 // 内，定时/自动播报不直接发送，统一积压到 end 整点冲刷补发。积压形态：
 //   - task（gateTask）：可重扫的任务（次日提醒/当日询问/对账）
 //     只登记名字+触发槽位，冲刷时重新执行整个任务函数——以补发时刻的最新
-//     数据重查（「挤压要为挤压之后的事情负责」）。
+//     数据重查（「挤压要为挤压之后的事情负责」）；同名任务只保留最新槽位
+//     （合并语义，防整点类任务在窗口内逐小时堆积、冲刷连发多遍）。
 //   - payload（gatePayload）：一次性事件通知（收口回执等）原样落盘按序补发。
 //
 // 积压持久化到项目根 .quiet-backlog.json：重启不丢。启动时已过 end 整点则
@@ -149,6 +150,13 @@ async function gateTask(name, fireKey, run, label = name) {
   if (items.some((it) => it.type === 'task' && it.name === name && it.fireKey === fireKey)) {
     console.log(`[晚间静默] ${label} 该槽位已积压，跳过重复登记`);
     return { deferred: true, note: '已积压' };
+  }
+  // 可重扫任务的合并语义：同名任务只保留最新槽位——冲刷时重跑整个任务函数、
+  // 以补发时刻最新数据重查，旧槽位的结果注定被覆盖（「挤压要为挤压之后的事情负责」）。
+  // 否则每小时整点类任务（快递未取播报）在静默窗口逐小时各积压一条，09:00 冲刷
+  // 同一清单连发 N 遍。
+  for (let i = items.length - 1; i >= 0; i--) {
+    if (items[i].type === 'task' && items[i].name === name) items.splice(i, 1);
   }
   items.push({ type: 'task', name, fireKey, queuedAt: new Date().toISOString() });
   saveBacklog(items);

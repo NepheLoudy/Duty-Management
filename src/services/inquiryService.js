@@ -315,7 +315,7 @@ async function sendLastCall(options = {}) {
  * - 未做完成员生成下周补偿插入义务（已请假者在请假当时已生成）；
  * - 清空当日监听会话。
  * 写表动作不做静默延迟；返回的 notifications 由调用方决定直接发送或过闸门补发。
- * @returns {{date, results: Array, dayStatus, notifications: {photoOnly: Array, adminText: string}}}
+ * @returns {{date, results: Array, dayStatus, notifications: {photoOnly: Array, missNotices: Array, adminText: string}}}
  */
 async function closeToday(options = {}) {
   const dryRun = Boolean(options.dryRun);
@@ -468,7 +468,9 @@ function confirmLeave(openId) {
       };
     }
     state.mutate((s) => { if (s.pendingLeaves) delete s.pendingLeaves[openId]; });
-    return requestLeaveLocked({ name: pending.name, openId, recordId: rec.recordId });
+    // 第二参是 knownRecordId（v36 语义：按 recordId 精确请假）——recordId 混进 member
+    // 对象会让精确请求退化为按姓名取最早班次（确认会话点名的班次可能因此请错）
+    return requestLeaveLocked({ name: pending.name, openId }, rec.recordId);
   });
 }
 
@@ -514,7 +516,9 @@ async function requestLeaveLocked(member, knownRecordId) {
 
 /** 发送收口回执（cron 静默冲刷补发与手动触发共用） */
 async function sendCloseNotifications(notifications) {
-  for (const item of notifications.missNotices || notifications.photoOnly || []) {
+  // 只认 missNotices（元素带 photos 标记区分文案）；旧形态 photoOnly 回退已删——
+  // 其元素无 photos 字段会发错文案，且生产路径（closeToday）恒带 missNotices
+  for (const item of notifications.missNotices || []) {
     if (!item.openId) continue;
     const text = item.photos
       ? '🧹 今天的值日已按「未做完」收口：你上传了照片但没有回复「打卡」。下次记得照片 + 回复「打卡」才算完成哦。'

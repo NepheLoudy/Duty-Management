@@ -3,7 +3,7 @@
 > 版本隔离单位 = 一次 `npm run push`（即一次 git 提交 + 一次部署）。
 > 每次 push 完成后在文末追加：`## vN · YYYY-MM-DD · <提交哈希> · <类型>`，
 > 正文为提交说明原文 + 实际改动要点。vN 只增不复用，历史条目不改写。
-> 当前最新：**v39**（2026-09-25，随本提交落地）。上一版 v38（对账文案+文档批，`7781ee1`）。更早：v37（b8db8a6，09-25 值日全面检修）、v36（7a7a361，09-24 值日公平性批）。
+> 当前最新：**v40**（2026-09-26，随本提交落地）。上一版 v38（对账文案+文档批，`7781ee1`）。更早：v37（b8db8a6，09-25 值日全面检修）、v36（7a7a361，09-24 值日公平性批）。
 
 
 
@@ -396,3 +396,13 @@
 - **修复**：两条顺延路径 push 时显式携带 `deferCount`（+1 后值）与 `deferReason`（容量='weekly_allowance'/满周=''），满周路径 mutate 里同步 `delete o2.deferReason` 防持久化层脏读。
 - **注释清理**：compensationService:28（请假即有补位→同日兼顾）、inquiryService:77/:402、stateStore:11、assistantService:50 等按 v37 后口径改写。
 - **测试**：stub-test-flow 补条件断言「满周顺延报告口径为天天有班」（当前桩日期下 C 的义务被安置未触发顺延分支，断言作为该分支护栏保留）；全量 7 套桩过。
+
+## v40 · 2026-09-26 · 随本提交落地 · fix
+
+**七仓全量审查修复批（P1×4 + P2×5）**
+
+- 提交说明：fix: 全量审查修复——幂等键/补偿义务回退/请假精确化/静默积压合并等
+- **P1×4**：①消息幂等键 messageId→messageId+载荷类型（hub 对图文混合消息拆两次转发带同 messageId，第二次恒被丢——取件码文字+照片同发时照片必丢）；②generate 路径 markPlaced 补写 placedDate（rebalance 义务重置要求 placed&&placedDate，缺失则补偿义务静默丢失）；③confirmLeave 按 pending.recordId 精确请假（原第二参恒 undefined 退化为按姓名取最早班次可错班）；④quietHours gateTask 同名任务积压合并只留最新槽位（快递整点播报静默窗逐小时堆积、09:00 冲刷同一清单连发 7 遍）。
+- **P2**：push.js planPrivateConfig 区分 ENOENT 与其他错误（瞬时 SFTP 故障不再绕过守卫）、tar exclude 补 policy-override.json；README 间隔措辞对齐实现（≥3 天口径）；photoOnly 死分支删除（测试载荷同批迁生产形态）；compensationService 对账顺延原因按 deferReason 分列。
+- 遗留（另批）：rebalance 保留请假记录与重排同日冲突（排班核心，需生成侧注入保留快照）。
+- 测试：七套全绿，flow 套新增 placedDate 与 photos 分支断言。

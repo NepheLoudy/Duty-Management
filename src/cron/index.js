@@ -61,7 +61,8 @@ function startCronJobs() {
   tasks.push(scheduleTask(config.schedule.reconcile, 'duty_reconcile', '值日对账', quietTaskRunners.duty_reconcile));
   tasks.push(scheduleTask(config.schedule.boardBroadcast, 'duty_board_broadcast', '看板自动播报', quietTaskRunners.duty_board_broadcast));
   // 快递未取播报（每小时整点 EXPRESS_BROADCAST_SCHEDULE；无未取跳过不发；过静默闸门，
-  // 冲刷补发时以补发时刻最新数据重查——夜间已被取完的不再播）
+  // 冲刷补发时以补发时刻最新数据重查——夜间已被取完的不再播；静默窗口内同名积压
+  // 合并只留最新槽位，09:00 冲刷只补跑一次）
   tasks.push(scheduleTask(config.express.broadcastSchedule, 'duty_express_broadcast', '快递未取播报', quietTaskRunners.duty_express_broadcast));
 
   // 收口：写表动作不延迟（不进 gateTask），仅通知载荷过闸门。

@@ -36,17 +36,21 @@ app.get('/api/health', (req, res) => {
 //   图片载荷 {type:'image', openId, imageKey, messageId}
 // 返回：{reply}；reply 为空串表示已自行处理（如群看板卡片），hub 可跳过发送
 
-// 消息级幂等（webhook/网关重投防双计：同一句「我要请假」触发两次会双倍登记补偿义务）
-const seenMessages = new Map(); // messageId -> firstSeenAt
+// 消息级幂等（webhook/网关重投防双计：同一句「我要请假」触发两次会双倍登记补偿义务）。
+// 去重键 = messageId + 载荷类型：hub 对快递群图文混合消息拆两次转发（取件码文字 +
+// 照片载荷）且带同一 messageId——裸 messageId 去重会把第二次当重投丢弃（照片必丢）；
+// 同载荷类型的网关重投仍被拦。express 登记端另有表级 messageId 去重兜底，此处为消息级双保险。
+const seenMessages = new Map(); // "messageId:kind" -> firstSeenAt
 const SEEN_TTL_MS = 10 * 60 * 1000;
-function isDuplicateMessage(messageId) {
+function isDuplicateMessage(messageId, kind) {
   if (!messageId) return false;
+  const key = `${messageId}:${kind || 'command'}`;
   const now = Date.now();
   for (const [k, t] of seenMessages) {
     if (now - t > SEEN_TTL_MS) seenMessages.delete(k);
   }
-  if (seenMessages.has(messageId)) return true;
-  seenMessages.set(messageId, now);
+  if (seenMessages.has(key)) return true;
+  seenMessages.set(key, now);
   return false;
 }
 
@@ -54,8 +58,8 @@ app.post('/api/chat/command', async (req, res) => {
   try {
     const body = req.body || {};
 
-    if (isDuplicateMessage(body.messageId)) {
-      console.log('[指令] 重复消息已忽略:', body.messageId);
+    if (isDuplicateMessage(body.messageId, body.type)) {
+      console.log('[指令] 重复消息已忽略:', body.messageId, body.type || 'command');
       return res.json({ reply: '' });
     }
 

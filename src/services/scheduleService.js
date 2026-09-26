@@ -85,13 +85,14 @@ async function generate(options = {}) {
         pendingByMember.get(ins.name).push(ins.id);
       }
     }
-    const markPlaced = (ids) => {
+    const markPlaced = (ids, dateStr) => {
       if (ids.length === 0) return;
       state.mutate((s) => {
         for (const o of s.obligations) {
           if (ids.includes(o.id)) {
             o.placed = true;
             o.placedAt = new Date().toISOString();
+            o.placedDate = dateStr; // 与 placePending 同款：rebalance 义务重置按 placed && placedDate 判定，缺 placedDate 会让生成安置的义务重排后不被重置
             o.via = 'generate';
           }
         }
@@ -113,7 +114,7 @@ async function generate(options = {}) {
         const q = pendingByMember.get(it.insertionName);
         if (q && q.length > 0) dayPlaced.push(q.shift());
       }
-      markPlaced(dayPlaced);
+      markPlaced(dayPlaced, day.date);
     }
   }
 
