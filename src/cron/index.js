@@ -1,6 +1,7 @@
 const cron = require('node-cron');
 const config = require('../config');
 const quietHours = require('../utils/quietHours');
+const { shanghaiParts, addDays } = require('../utils/dates');
 const inquiry = require('../services/inquiryService');
 const compensation = require('../services/compensationService');
 const assistant = require('../services/assistantService');
@@ -66,12 +67,15 @@ function startCronJobs() {
   tasks.push(scheduleTask(config.express.broadcastSchedule, 'duty_express_broadcast', '快递未取播报', quietTaskRunners.duty_express_broadcast));
 
   // 收口：写表动作不延迟（不进 gateTask），仅通知载荷过闸门。
-  // 24:00（0 点）收口已跨日：closeToday 默认取「今天」会落空——按上海时间回退
-  // 30 分钟计算归属日期（0:00-0:30 窗口内=前一天 D 日；若手动把收口改到白天则=当天，不影响）
+  // 24:00（0 点）收口已跨日：closeToday 默认取「今天」会落空——归属日按上海墙上时钟
+  // 判定（2026-09-27 修）：凌晨 <06:00 触发的收口一律归属前一日 D 日（正常 0 点触发与
+  // 宿主休眠/积压导致的延迟补触都落在此窗）；白天触发=当天（手动把收口改到白天的语义不变）。
+  // 此前按 now-30min 推算归属，触发被延迟超 30 分钟时推算落进新当天，会把新当天
+  // 整日记录误置「未做完」。
   const deadlineTask = cron.schedule(config.schedule.deadline, () => {
     console.log('[定时任务] 触发值日收口');
-    const shifted = new Date(Date.now() + 8 * 60 * 60 * 1000 - 30 * 60 * 1000);
-    const dutyDate = shifted.toISOString().slice(0, 10);
+    const now = shanghaiParts();
+    const dutyDate = now.hh < 6 ? addDays(now.dateStr, -1) : now.dateStr;
     runClose({ dateStr: dutyDate })
       .catch((err) => console.error('[定时任务] 值日收口失败:', err.message));
   }, { timezone: 'Asia/Shanghai' });

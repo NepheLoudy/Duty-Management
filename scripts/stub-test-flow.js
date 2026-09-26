@@ -244,6 +244,14 @@ function check(desc, cond, detail = '') {
   const leaveStale = await inquiry.confirmLeave('ou_test_d');
   check('取消后确认：提示无待确认', leaveStale.handled && leaveStale.reply.includes('没有待确认的请假'), leaveStale.reply);
   await inquiry.requestLeave(roster.findByName('队员D'));
+  // 请假前快照（2026-09-27 断言口径修正）：生成阶段可能已在 D 的班次日安置过他人的
+  // 合法补偿插入（该日成 4 人日）——那是补偿插入落点，不是请假动作新增的补位记录；
+  // 旧口径 sameDay.length===3 对生成插入落点日期敏感误报。新口径：确认动作不新增记录。
+  const beforeLeave = await dutyTable.getAllDayRecords();
+  const dTargetRec = beforeLeave.find((r) => r.name === '队员D' && r.dateStr > today && !r.status);
+  const beforeLeaveIds = dTargetRec
+    ? beforeLeave.filter((r) => r.dateStr === dTargetRec.dateStr).map((r) => r.recordId).sort()
+    : [];
   const leave = await inquiry.confirmLeave('ou_test_d');
   check('队员D 请假第二步：已登记请假', leave.handled && leave.reply.includes('已登记请假'), leave.reply);
   const pendingOb = state.load().obligations.filter((o) => !o.placed);
@@ -257,8 +265,9 @@ function check(desc, cond, detail = '') {
     const all = await dutyTable.getAllDayRecords();
     const dLeave = all.find((r) => r.name === '队员D' && r.status === '已请假');
     const sameDay = all.filter((r) => r.dateStr === dLeave.dateStr);
-    check('请假当日空缺：该日无第 4 条补位记录', sameDay.length === 3,
-      JSON.stringify(sameDay.map((r) => [r.name, r.position, r.status])));
+    check('请假当日空缺：请假动作未新增记录（对比请假前快照，生成期合法插入不算补位）',
+      Boolean(dTargetRec) && dLeave.dateStr === dTargetRec.dateStr && sameDay.length === beforeLeaveIds.length,
+      JSON.stringify({ day: dLeave.dateStr, before: beforeLeaveIds.length, after: sameDay.length }));
     check('请假回执说明当日空缺', leave.reply.includes('空缺'), leave.reply);
     check('请假不发送补位私信', !memory.dmCalls.some((c) => c.text.includes('补位通知')),
       JSON.stringify(memory.dmCalls.map((c) => c.text.slice(0, 20))));
@@ -397,9 +406,18 @@ function check(desc, cond, detail = '') {
         const wk = mondayOf(d);
         overByWeek.set(wk, (overByWeek.get(wk) || 0) + 1);
       }
-      check('重排后：每周 4 人日不超过容量 K=2',
-        [...overByWeek.values()].every((n) => n <= 2),
-        JSON.stringify({ overThree: overThree.map(([d, rs]) => `${d}:${rs.length}`), byWeek: [...overByWeek.entries()] }));
+      // 容量口径（2026-09-27 修）：保留的已请假日会被补偿插入「请假空缺位回填」
+      // （fillLeave 不占周容量 K，实际干活人数不变）——每个保留请假日至多贡献 1 个
+      // 4 记录日，故该周上限 = K + 该周保留请假日数（日期敏感：保留请假日落哪周随日期变）
+      const keptLeaveDates = preview.keptFuture
+        .filter((line) => line.includes('已请假'))
+        .map((line) => line.split(' ')[0]);
+      check('重排后：每周 4 人日 ≤ 容量 K=2 + 该周保留请假日的合法回填位',
+        [...overByWeek.entries()].every(([wk, n]) => {
+          const fillSlots = keptLeaveDates.filter((d) => mondayOf(d) === wk).length;
+          return n <= 2 + fillSlots;
+        }),
+        JSON.stringify({ overThree: overThree.map(([d, rs]) => `${d}:${rs.length}`), byWeek: [...overByWeek.entries()], keptLeaveDates }));
     }
   }
 

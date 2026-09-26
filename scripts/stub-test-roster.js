@@ -49,6 +49,22 @@ function check(desc, cond, detail = '') {
   check('同步：admin 标记按姓名保留', synced.find((m) => m.name === '队员甲').admin === true);
   check('同步：多部门合并进 dept 字段', synced.find((m) => m.name === '队员乙').dept === '机械组/电控组');
 
+  // ①.5 绑定抢占防护（2026-09-27）：已绑定姓名不可被其他 open_id 抢占——
+  // 否则任何队员私信「绑定 已绑定者姓名」即可代他人值日
+  const takeover = roster.bindOpenId('队员甲', 'ou_evil');
+  check('绑定抢占：已绑定姓名被其他账号抢占 → 拒绝且名册不变',
+    takeover.ok === false && takeover.message.includes('已绑定') && takeover.message.includes('联系管理员')
+    && roster.findByName('队员甲').openId === 'ou_new_a',
+    JSON.stringify(takeover));
+  const rebindSelf = roster.bindOpenId('队员甲', 'ou_new_a');
+  check('绑定幂等：同账号重复绑定同名 → 照常成功', rebindSelf.ok === true, JSON.stringify(rebindSelf));
+  const rawMembers = JSON.parse(fs.readFileSync(process.env.DUTY_MEMBERS_FILE, 'utf-8'));
+  rawMembers.members.find((m) => m.name === '队员乙').openId = '';
+  fs.writeFileSync(process.env.DUTY_MEMBERS_FILE, JSON.stringify(rawMembers, null, 2));
+  const manualBind = roster.bindOpenId('队员乙', 'ou_manual_b');
+  check('绑定兜底：未绑定姓名照常绑定成功', manualBind.ok === true && (roster.findByOpenId('ou_manual_b') || {}).name === '队员乙',
+    JSON.stringify(manualBind));
+
   // ② 白名单增删（定制窗口的写逻辑）
   const afterAdd = roster.updateWhitelist({ add: ['队员乙'] });
   check('白名单：追加后含旧值+新值', afterAdd.includes('队员丙') && afterAdd.includes('队员乙'));

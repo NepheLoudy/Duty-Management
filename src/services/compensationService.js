@@ -5,6 +5,7 @@ const dutyTable = require('./dutyTableService');
 const roster = require('./rosterService');
 const state = require('./stateStore');
 const bot = require('../feishu/bot');
+const { withScheduleLock } = require('./scheduleService');
 
 // ============================================================
 // 缺勤补偿（可突破轮次上限）
@@ -120,9 +121,15 @@ function resetStreak(memberName) {
 /**
  * 尝试就地安置未安置的义务：目标周已有排班 → 插入；目标周还没生成 → 留队；
  * 目标周已生成但该队员周内天天有班 → 顺延下一周（2026-09-19，小队满周退化路径）。
+ * 排班写链路全局串行（2026-09-27）：与 generate/rebalance 共用 withScheduleLock，
+ * 生成刚落表的对账安置不会与管理员手工触发的生成交叉读改写。
  * @returns {{placed: Array, stillQueued: Array, deferred: Array, expired: Array}}
  */
 async function placePending(options = {}) {
+  return withScheduleLock(() => placePendingLocked(options));
+}
+
+async function placePendingLocked(options = {}) {
   const dryRun = Boolean(options.dryRun);
   const placed = [];
   const stillQueued = [];

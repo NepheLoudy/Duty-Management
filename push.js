@@ -61,7 +61,8 @@ const PRIVATE_CONFIG_FILES = ['config/members.json', 'config/whitelist.json', 'c
 const DATA_DIR = '/c/home/qianli/duty-bot-data';
 const DATA_DIR_WIN = 'C:/home/qianli/duty-bot-data';
 
-/** 估算配置里的条目数（数组字段长度求和；解析失败按内容字节数/100 估） */
+/** 估算配置里的条目数（数组字段长度求和）；返回 null = JSON 损坏（不可按字节猜——
+ *  此前的 content.length/100 估算会把损坏文件当「超条数现网」误触发回填/恢复） */
 function countEntries(content) {
   if (!content || !content.trim()) return 0;
   try {
@@ -70,7 +71,7 @@ function countEntries(content) {
     if (arrays.length) return arrays.reduce((sum, a) => sum + a.length, 0);
     return Object.keys(obj).length;
   } catch {
-    return Math.floor(content.length / 100);
+    return null;
   }
 }
 
@@ -193,11 +194,15 @@ async function deployCode(sftp, plan) {
       '--exclude=node_modules',
       '--exclude=.git',
       '--exclude=.env',
+      // 本地私有环境覆盖（.env 上传单独走 SFTP，2026-09-27 补洞）
+      '--exclude=.env.local',
+      '--exclude=.env.*.local',
       '--exclude=config/members.json',
       '--exclude=config/whitelist.json',
       '--exclude=config/policy-override.json',
       '--exclude=.duty-state.json',
       '--exclude=.quiet-backlog.json',
+      '--exclude=reb_*.json',
       '--exclude=logs',
       '--exclude=*.log',
       '--exclude=' + TAR_NAME,
@@ -291,7 +296,20 @@ function planPrivateConfig(sftp, i, plan, done) {
     const hasLocal = fs.existsSync(path.join(__dirname, f));
     const localContent = hasLocal ? fs.readFileSync(path.join(__dirname, f), 'utf8') : '';
     const remoteCount = readErr ? 0 : countEntries(remoteContent);
+    if (!readErr && remoteCount === null) {
+      // 现网 JSON 损坏（2026-09-27）：不再按字节估算条数误触发「回填本地/恢复」，
+      // 直接中止部署，人工确认现网内容后再推（本中止不受 PUSH_FORCE_PRIVATE 影响）
+      console.error(`[私有配置保护] 现网 ${f} JSON 损坏（解析失败），无法可靠盘点条数，中止部署。`);
+      console.error('  请人工检查部署目标上该文件内容（必要时从数据目录 backup/ 恢复）后重跑。');
+      conn.end();
+      process.exit(1);
+    }
     const localCount = countEntries(localContent);
+    if (hasLocal && localCount === null) {
+      console.error(`[私有配置保护] 本地 ${f} JSON 损坏（解析失败），无法可靠比对条数，中止部署。`);
+      conn.end();
+      process.exit(1);
+    }
 
     if (readErr && !hasLocal) {
       // 远端没有、本地也没有：无事可做
@@ -347,14 +365,46 @@ function applyPrivateConfig(sftp, i, plan, done) {
     });
   }
   return mkdirThen(() => {
-    sftp.fastPut(path.join(__dirname, f), remotePath, (err2) => {
-      if (err2) {
-        console.error(`${f} 上传失败:`, err2.message);
+    // 覆盖前重读二次判定（2026-09-27）：盘点（代码替换前）与覆盖之间有时间窗——
+    // git 路径现网文件存活、期间可能又被人工编辑；SFTP 直传路径该文件已被 rm -rf
+    // 清掉（ENOENT → 按盘点结果直传）。现网条数反超本地种子时改恢复现网，不覆盖。
+    sftp.readFile(remotePath, 'utf8', (rErr, rContent) => {
+      if (!rErr) {
+        const rc = countEntries(rContent);
+        if (rc === null) {
+          console.error(`[私有配置保护] 覆盖前重读：现网 ${f} JSON 损坏（解析失败），中止部署，请人工确认后重跑。`);
+          conn.end();
+          process.exit(1);
+        }
+        const lc = countEntries(fs.readFileSync(path.join(__dirname, f), 'utf8'));
+        if (rc > lc && process.env.PUSH_FORCE_PRIVATE !== '1') {
+          console.warn(`⚠ [私有配置保护] 覆盖前重读：${f} 现网 ${rc} 条 > 本地 ${lc} 条（盘点后现网又被编辑），改恢复现网版本。`);
+          fs.writeFileSync(path.join(__dirname, f), rContent);
+          return sftp.writeFile(remotePath, rContent, (wErr) => {
+            if (wErr) {
+              console.error(`${f} 现网内容回写失败:`, wErr.message);
+              conn.end();
+              process.exit(1);
+            }
+            console.log(`✓ ${f} 已按现网版本恢复（覆盖前重读判定本地种子过期）`);
+            applyPrivateConfig(sftp, i + 1, plan, done);
+          });
+        }
+      } else if (rErr.code !== 'ENOENT' && rErr.code !== 2) {
+        // 重读失败 ≠ 现网为空：非 ENOENT（ssh2 对不存在文件抛数字码 2）一律中止
+        console.error(`[私有配置保护] 覆盖前重读 ${f} 失败（${rErr.code || '无错误码'} ${rErr.message}），无法确认现网状态，中止部署。`);
         conn.end();
         process.exit(1);
       }
-      console.log(`✓ ${f} 已上传`);
-      applyPrivateConfig(sftp, i + 1, plan, done);
+      sftp.fastPut(path.join(__dirname, f), remotePath, (err2) => {
+        if (err2) {
+          console.error(`${f} 上传失败:`, err2.message);
+          conn.end();
+          process.exit(1);
+        }
+        console.log(`✓ ${f} 已上传`);
+        applyPrivateConfig(sftp, i + 1, plan, done);
+      });
     });
   });
 }

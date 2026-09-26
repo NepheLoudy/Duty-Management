@@ -256,8 +256,10 @@ app.get('/api/bot/cron-status', (req, res) => {
 // ---------- 启动 ----------
 
 function startServer() {
-  const server = app.listen(config.port, () => {
-    console.log(`🚀 值日提醒机器人运行在 http://localhost:${config.port}`);
+  // 仅回环监听（2026-09-27）：消费方（hub 指令转发/gateway/本地运维台 SSH 代理）都在本机，
+  // 不对局域网暴露端口；需要跨机访问走隧道，不在此开全网卡
+  const server = app.listen(config.port, '127.0.0.1', () => {
+    console.log(`🚀 值日提醒机器人运行在 http://127.0.0.1:${config.port}（仅回环监听，消费方均在本机）`);
     console.log(`🩺 健康检查: http://localhost:${config.port}/api/health`);
     console.log(`📋 值日简报: http://localhost:${config.port}/api/duty/brief`);
     console.log(`🧹 管辖策略: http://localhost:${config.port}/api/duty/policy (管辖群 ${config.jurisdiction.groupChatIds.length || '不限'} 个)`);

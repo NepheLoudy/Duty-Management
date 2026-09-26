@@ -10,7 +10,18 @@ const fs = require('fs');
 
 // ---- 环境隔离（必须在 require 任何 src 模块前设置） ----
 const TMP = fs.mkdtempSync(path.join(os.tmpdir(), 'duty-bot-policy-test-'));
-process.env.QUIET_HOURS_DISABLED = '1';
+// 静默窗口按当前上海小时动态开启（覆盖当前时刻）：供 gateTask 同名合并断言用；
+// 其余用例不受影响（cron 定时任务在本测不启动，gateTask 只在显式调用时写积压）
+const shH = Math.floor((Date.now() / 1000 + 8 * 3600) / 3600) % 24;
+process.env.QUIET_HOURS_DISABLED = '0';
+if (shH >= 23) {
+  process.env.QUIET_HOURS_START = '23';
+  process.env.QUIET_HOURS_END = '0'; // 跨午夜写法：23 点后全程静默
+} else {
+  process.env.QUIET_HOURS_START = String(shH);
+  process.env.QUIET_HOURS_END = String(shH + 1);
+}
+process.env.QUIET_BACKLOG_FILE = path.join(TMP, 'quiet-backlog.json');
 process.env.DUTY_STATE_FILE = path.join(TMP, 'state.json');
 process.env.DUTY_MEMBERS_FILE = path.join(TMP, 'members.json');
 process.env.DUTY_WHITELIST_FILE = path.join(TMP, 'whitelist.json');
@@ -62,10 +73,11 @@ function check(desc, cond, detail = '') {
     p.hubEnforcement.groupBoardCommand === '值日助手'
     && p.hubEnforcement.closeBasicCommands === true
     && typeof p.hubEnforcement.fallbackGuidance === 'string' && p.hubEnforcement.fallbackGuidance.includes('值日助手'));
-  check('策略：p2p 指令清单 10 核心词（含打卡/打卡了/请假确认两步）+8 打卡口语变体 +10 斜杠别名 +快递助手 5 词 +取件词形 + 绑定前缀',
-    p.p2pCommands.length === 36
-    && ['快递助手', '快递', '查询当前快递', '已取', '全部已取', '/快递助手', '/快递', '/查询当前快递'].every((w) => p.p2pCommands.includes(w))
+  check('策略：p2p 指令清单 10 核心词（含打卡/打卡了/请假确认两步）+8 打卡口语变体 +10 斜杠别名 +快递助手 6 词 +取件词形 + 绑定前缀',
+    p.p2pCommands.length === 37
+    && ['快递助手', '快递', '查询当前快递', '已取', '全部已取', '确认全部已取', '/快递助手', '/快递', '/查询当前快递'].every((w) => p.p2pCommands.includes(w))
     && Array.isArray(p.p2pCommandPatterns) && p.p2pCommandPatterns.includes('^已取\\s*\\d*$')
+    && p.p2pCommandPatterns.includes('^全部已取$') && p.p2pCommandPatterns.includes('^确认全部已取$')
     && Array.isArray(p.groupCommands) && p.groupCommands.includes('快递') && p.groupCommands.includes('值日助手')
     && p.express && p.express.enabled === true
     && ['打卡', '打卡了', '/打卡', '/打卡了'].every((w) => p.p2pCommands.includes(w))
@@ -83,6 +95,21 @@ function check(desc, cond, detail = '') {
   const rejected = await assistant.handleCommand({ command: '值日助手', chatType: 'group', chatId: 'oc_other' });
   check('非管辖群请求看板 → 静默拒绝（不出卡）',
     rejected.handled === true && rejected.reply === '' && !cardsSent.includes('oc_other'));
+
+  // ③.5 gateTask 同名合并（2026-09-27 补断言）：静默窗口内同名任务只保留最新槽位、
+  // 异名互不影响——否则整点类任务在窗口内逐小时堆积，冲刷连发多遍
+  const quietHours = require('../src/utils/quietHours');
+  check('闸门前置：当前处于测试静默窗口', quietHours.inQuietHours());
+  await quietHours.gateTask('test_merge_task', 'slot-1', async () => {}, '合并测试1');
+  await quietHours.gateTask('test_merge_task', 'slot-2', async () => {}, '合并测试2');
+  await quietHours.gateTask('test_other_task', 'slot-1', async () => {}, '合并测试其他');
+  const backlogItems = JSON.parse(fs.readFileSync(process.env.QUIET_BACKLOG_FILE, 'utf-8')).items;
+  check('gateTask 同名合并：同名只留最新槽位，异名互不影响',
+    backlogItems.filter((it) => it.type === 'task' && it.name === 'test_merge_task').length === 1
+    && backlogItems.find((it) => it.name === 'test_merge_task').fireKey === 'slot-2'
+    && backlogItems.some((it) => it.name === 'test_other_task'),
+    JSON.stringify(backlogItems));
+  fs.rmSync(process.env.QUIET_BACKLOG_FILE, { force: true });
 
   const managed = await assistant.handleCommand({ command: '值日助手', chatType: 'group', chatId: 'oc_managed_a' });
   check('管辖群请求看板 → 正常出卡（限流内首发）',

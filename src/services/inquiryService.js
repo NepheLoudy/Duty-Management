@@ -368,7 +368,6 @@ async function closeToday(options = {}) {
     .filter((r) => r.photos && r.status === config.status.MISS)
     .map((r) => ({ name: r.name, position: r.position, openId: (roster.findByName(r.name) || {}).openId || '' }));
   const missList = results.filter((r) => r.status === config.status.MISS);
-  const unnotified = results.filter((r) => r.status === config.status.MISS && r.name && !(roster.findByName(r.name) || {}).openId);
   // 未做完者本人私信通知（2026-09-16：此前只有管理员摘要，未做完者本人毫无感知）
   const missNotices = results
     .filter((r) => r.status === config.status.MISS && r.name && r.markedNow)

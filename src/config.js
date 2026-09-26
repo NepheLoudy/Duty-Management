@@ -135,6 +135,9 @@ module.exports = {
       picked: process.env.EXPRESS_FIELD_PICKED || '是否取件',
       pickedAt: process.env.EXPRESS_FIELD_PICKED_AT || '取件时间',
       messageId: process.env.EXPRESS_FIELD_MESSAGE_ID || '消息ID',
+      // 取件确认人备注（2026-09-27 新增）：「已取n/全部已取」确认时记录确认人；
+      // 表里没建该列时写备注失败会自动降级为只写已取（见 expressService.markPicked）
+      remark: process.env.EXPRESS_FIELD_REMARK || '备注',
     },
   },
 

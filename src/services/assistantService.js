@@ -173,11 +173,21 @@ async function broadcastTodayBoard({ dryRun = false } = {}) {
     console.warn('[看板播报] 未配置 DUTY_BOARD_WEBHOOK_URL 且无管辖群可直发，自动播报跳过');
     return { skipped: true, reason: 'webhook_not_configured_and_no_group', date: todayStr() };
   }
+  // 逐群异常隔离（2026-09-27）：一个群直发失败不再中断其余群（旧循环一群抛错整批丢弃）
+  let delivered = 0;
   for (const chatId of targets) {
-    await bot.sendCardToChat(chatId, card);
+    try {
+      await bot.sendCardToChat(chatId, card);
+      delivered += 1;
+    } catch (err) {
+      console.error(`[看板播报] 管辖群 ${chatId} 直发失败:`, err.message);
+    }
   }
-  console.log(`[看板播报] 未配置 webhook，已按应用身份直发 ${targets.length} 个管辖群（${records.length} 条记录）`);
-  return { skipped: false, via: 'app', groups: targets.length, date: todayStr() };
+  if (delivered === 0) {
+    return { skipped: true, reason: 'all_groups_failed', date: todayStr() };
+  }
+  console.log(`[看板播报] 未配置 webhook，已按应用身份直发 ${delivered}/${targets.length} 个管辖群（${records.length} 条记录）`);
+  return { skipped: false, via: 'app', groups: delivered, date: todayStr() };
 }
 
 /**

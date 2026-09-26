@@ -123,11 +123,12 @@ function pendingRecords() {
   r = await express.queryPending();
   ok(r.reply.includes('1. 12-3-4567') && r.reply.includes('2. （未留码）'), '查询：编号与未留码标注');
 
-  // 12. 取件（带编号）
-  r = await express.handlePickup({ arg: '1' });
+  // 12. 取件（带编号）：备注列记录确认人（2026-09-27）
+  r = await express.handlePickup({ arg: '1', openId: 'ou_u1' });
   ok(r.reply.includes('编号 1（12-3-4567）已记为已取'), '已取1：确认回执');
   ok(pickedRecords().length === 1 && pendingRecords().length === 1, '已取1：表格是否取件=已取');
   ok(Boolean(pickedRecords()[0].fields['取件时间']), '已取1：取件时间落表');
+  ok(pickedRecords()[0].fields['备注'] === '确认人：张三', '已取1：备注记录确认人');
 
   // 13. 旧编号再次取 → 无此编号（两次播报间编号稳定，不自动重排）
   r = await express.handlePickup({ arg: '1' });
@@ -142,9 +143,14 @@ function pendingRecords() {
   await express.observe({ text: '55-5-1111', openId: 'ou_u1', messageId: 'm7', chatId: 'oc_express' });
   r = await express.handlePickup({ arg: '' });
   ok(r.reply.includes('请带编号回复') && r.reply.includes('全部已取'), '多件无编号：引导带编号');
-  // 但先清掉刚登记的再继续（保持后续用例状态可控）
-  await express.handlePickup({ arg: 'all' });
-  ok(pendingRecords().length === 0 && rawRecords.length === 3, '全部已取：三件全记已取');
+  // 但先清掉刚登记的再继续（保持后续用例状态可控）——「全部已取」两步确认（2026-09-27：
+  // 首次只武装确认不清表，60 秒内同 openId 复核词才生效；未武装的复核词不生效）
+  r = await express.handlePickup({ arg: 'all' });
+  ok(r.reply.includes('确认全部已取') && r.reply.includes('2 件') && pendingRecords().length === 2, '全部已取第一步：仅武装确认，表格未动');
+  const rOther = await express.handlePickup({ arg: 'all', confirm: true, openId: 'ou_other' });
+  ok(rOther.reply.includes('没有待确认') && pendingRecords().length === 2, '他人未武装直接确认：不生效不清表');
+  r = await express.handlePickup({ arg: 'all', confirm: true });
+  ok(pendingRecords().length === 0 && rawRecords.length === 3, '全部已取第二步：确认后三件全记已取');
 
   // 16. 全空播报跳过
   r = await express.broadcastPending();

@@ -22,7 +22,8 @@ const HELP_TEXT = [
   '📦 快递助手用法：',
   '· 「快递」—— 开启 5 分钟快递登记窗口（窗口内把取件码发到群里即可，可跟发快递照片）',
   '· 「查询当前快递」—— 查看当前未取清单与编号',
-  '· 取完后发「@机器人 已取编号」（如「已取1」，多件时必须带编号）或「全部已取」',
+  '· 取完后发「@机器人 已取编号」（如「已取1」，多件时必须带编号）',
+  '· 全部取完发「全部已取」→ 需 60 秒内再回「确认全部已取」二次确认才生效（防误触清表）',
   '· 每小时整点自动播报一次未取清单（无未取则不播）',
   '',
   '「是否取件」由机器人自动填写，无需手工维护。',
@@ -290,7 +291,7 @@ async function openWindow({ chatId, openId } = {}) {
 function isControlText(text) {
   if (!text) return true;
   if (text.startsWith('/')) return true;
-  if (PICKUP_ONE_RE.test(text) || text === '全部已取') return true;
+  if (PICKUP_ONE_RE.test(text) || text === '全部已取' || text === '确认全部已取') return true;
   const cmds = policy.getPolicy().p2pCommands;
   return cmds.includes(text) || cmds.includes(text.replace(/^\//, ''));
 }
@@ -391,42 +392,84 @@ async function observe(payload = {}) {
 
 // ---------- 取件确认与清单 ----------
 
-async function markPicked(record) {
-  await updateExpressRecord(record.recordId, {
+// 「全部已取」两步确认（2026-09-27）：此前零校验一次清空全表，误触/手滑会把没取的
+// 也一并记为已取。改为：首次「全部已取」只武装确认（同 openId 内存短窗 60 秒），
+// 60 秒内回「确认全部已取」才生效；「确认全部已取」单独出现（未武装）不生效。
+// 内存态即可：重启丢确认 = 回到未武装，落在安全侧。
+const PICKUP_ALL_CONFIRM_MS = 60 * 1000;
+const pickupAllArmed = new Map(); // confirmKey(openId，无则 anon) -> armedAt(ms)
+
+function pickupAllArmedFor(key) {
+  const at = pickupAllArmed.get(key);
+  if (!at) return false;
+  if (Date.now() - at > PICKUP_ALL_CONFIRM_MS) {
+    pickupAllArmed.delete(key);
+    return false;
+  }
+  return true;
+}
+
+/** 标记单件已取：备注列记录确认人（有 openId 则记名）；
+ *  表里没建备注列时降级为只写已取，不让确认动作本身失败 */
+async function markPicked(record, openId = '') {
+  const fields = {
     [f().picked]: '已取',
     [f().pickedAt]: Date.now(),
-  });
+  };
+  if (openId && f().remark) {
+    try {
+      await updateExpressRecord(record.recordId, { ...fields, [f().remark]: `确认人：${senderOf(openId)}` });
+      return;
+    } catch (err) {
+      console.warn(`[快递] 备注列写入失败（表缺「${f().remark}」列？），降级仅写已取:`, err.message);
+    }
+  }
+  await updateExpressRecord(record.recordId, fields);
 }
 
 /**
- * 取件确认：arg = ''（仅一件时生效）/ 'n'（编号）/ 'all'
- * 编号按最后一次播报/查询的快照对账（两次播报之间稳定）
+ * 取件确认：arg = ''（仅一件时生效）/ 'n'（编号）/ 'all'（两步确认）
+ * confirm = 本次来自「确认全部已取」复核词；编号按最后一次播报/查询的快照对账（两次播报之间稳定）
  */
-async function handlePickup({ arg = '' } = {}) {
+async function handlePickup({ arg = '', openId = '', confirm = false } = {}) {
   const { items, numbers } = await ensureNumbers();
   if (!items.length) return { handled: true, reply: '📦 当前没有未取快递。' };
   const listText = renderList(items, numbers);
 
   if (arg === 'all') {
-    for (const r of items) await markPicked(r);
-    console.log(`[快递] 全部已取（${items.length} 件）`);
+    const key = openId || 'anon';
+    const armed = pickupAllArmedFor(key);
+    if (confirm && !armed) {
+      return { handled: true, reply: '没有待确认的「全部已取」。请先回复「全部已取」，再在 60 秒内回复「确认全部已取」生效。' };
+    }
+    if (!armed) {
+      pickupAllArmed.set(key, Date.now());
+      console.log(`[快递] 「全部已取」待二次确认（${items.length} 件，key=${key === 'anon' ? '匿名' : `***${key.slice(-4)}`}` + '）');
+      return {
+        handled: true,
+        reply: `⚠️ 「全部已取」会把当前 ${items.length} 件全部记为已取（不可撤销）。请 60 秒内再次回复「确认全部已取」生效；只取部分请回复「已取编号」。`,
+      };
+    }
+    pickupAllArmed.delete(key);
+    for (const r of items) await markPicked(r, openId);
+    console.log(`[快递] 全部已取（${items.length} 件，确认人 ${openId ? senderOf(openId) : '未知'}）`);
     return { handled: true, reply: `✅ 已把 ${items.length} 件快递全部记为已取，辛苦了！` };
   }
 
   const n = parseInt(arg, 10);
   if (!Number.isFinite(n) || n <= 0) {
     if (items.length === 1) {
-      await markPicked(items[0]);
+      await markPicked(items[0], openId);
       return { handled: true, reply: `✅ 唯一一件（${items[0].code || '未留码'}）已记为已取，辛苦了！` };
     }
-    return { handled: true, reply: `📦 当前有 ${items.length} 件未取，请带编号回复（如「已取1」）：\n${listText}\n或回复「全部已取」。` };
+    return { handled: true, reply: `📦 当前有 ${items.length} 件未取，请带编号回复（如「已取1」）：\n${listText}\n或回复「全部已取」（需二次确认）。` };
   }
 
   const rec = items.find((r) => numbers[r.recordId] === n);
   if (!rec) {
     return { handled: true, reply: `❌ 没有编号 ${n} 的未取快递（编号可能已刷新）。当前未取：\n${listText}` };
   }
-  await markPicked(rec);
+  await markPicked(rec, openId);
   const remain = items.length - 1;
   console.log(`[快递] 编号 ${n}（${rec.code || '未留码'}）已取`);
   return {
@@ -479,9 +522,10 @@ async function handleCommand(raw, payload = {}) {
     case '查询当前快递':
       return queryPending();
     default: {
-      if (raw === '全部已取') return handlePickup({ arg: 'all' });
+      if (raw === '全部已取') return handlePickup({ arg: 'all', openId: payload.openId || '' });
+      if (raw === '确认全部已取') return handlePickup({ arg: 'all', confirm: true, openId: payload.openId || '' });
       const m = raw.match(PICKUP_ONE_RE);
-      if (m) return handlePickup({ arg: m[1] || '' });
+      if (m) return handlePickup({ arg: m[1] || '', openId: payload.openId || '' });
       return { handled: false, reply: '' };
     }
   }

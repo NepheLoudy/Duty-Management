@@ -9,9 +9,22 @@ const state = require('./stateStore');
 // 排班生成与对外数据
 // - generate：表格中最后一个已排日期的次日起，按日历生成 1 个月；
 //   轮转跨批次连续（配额从表格既有记录反推）；补偿插入义务优先安置。
+// - rebalance：清理未来未完成班次后重排，保留的未来已请假/未做完记录
+//   既占配额（extraHistoryRecordIds）也占日容量（preassigned 预置，2026-09-27）。
 // - getBrief：昨日结果 + 今日名单一次取齐（通用数据接口；pm-robot 消费方案已作废，2026-09-12 口径）。
 // - getNextDuty：个人下一次值日查询。
+// - 写链路互斥：generate/rebalance/placePending（compensation 侧）共用 withScheduleLock。
 // ============================================================
+
+// 排班写链路全局串行（2026-09-27，照 inquiryService.withLeaveLock 模式）：
+// generate/rebalance/placePending 都是「读全表 → 写表」的读改写链，双管理员同刻
+// 各触发一轮生成会交叉双写整月排班。低频管理操作，进程内全局链无性能影响。
+let scheduleChain = Promise.resolve();
+function withScheduleLock(fn) {
+  const task = scheduleChain.then(fn, fn);
+  scheduleChain = task.then(() => {}, () => {});
+  return task;
+}
 
 /** 生成范围内的补偿插入义务（未安置且目标周与生成范围相交） */
 function collectPendingInsertions(stateData, rangeStart, rangeEnd) {
@@ -36,6 +49,11 @@ function collectPendingInsertions(stateData, rangeStart, rangeEnd) {
  * @returns {{startDate, endDate, dayCount, recordCount, quotaReport, unplacedInsertions, preview}}
  */
 async function generate(options = {}) {
+  // 排班写链路全局串行（rebalance 内部走 generateLocked，不重复排队）
+  return withScheduleLock(() => generateLocked(options));
+}
+
+async function generateLocked(options = {}) {
   const dryRun = Boolean(options.dryRun);
   const extraIds = new Set(options.extraHistoryRecordIds || []);
 
@@ -48,6 +66,13 @@ async function generate(options = {}) {
   const history = allRecords
     .filter((r) => r.name && r.position && (r.dateStr < startDate || extraIds.has(r.recordId)))
     .map((r) => ({ name: r.name, position: r.position, date: r.dateStr }));
+
+  // 额外计入配额反推的记录若落在生成范围内（重排保留的未来已请假/未做完班次），
+  // 同时种进日占用表：基排按剩余容量补、插入按既有逻辑填请假位（2026-09-27 检修——
+  // 只占配额不占日容量会让该日照常叠满 3 条新基排，出现 5 记录日）
+  const preassigned = allRecords
+    .filter((r) => r.name && r.position && r.dateStr >= startDate && extraIds.has(r.recordId))
+    .map((r) => ({ name: r.name, position: r.position, date: r.dateStr, status: r.status || '' }));
 
   const stateData = state.load();
   const insertions = collectPendingInsertions(stateData, startDate, endDate);
@@ -68,6 +93,7 @@ async function generate(options = {}) {
     startDateStr: startDate,
     days: dayCount,
     history,
+    preassigned,
     insertions,
     minIntervalDays: config.generate.minIntervalDays,
     weeklyAllowance: options.weeklyAllowance != null ? options.weeklyAllowance : config.generate.weeklyInsertionAllowance,
@@ -100,12 +126,14 @@ async function generate(options = {}) {
     };
     for (const day of result.days) {
       const items = day.items
+        .filter((it) => !it.kept) // 重排保留的既有记录已在表中，不得重写（防重复落表）
         .map((it) => ({
           member: roster.findByName(it.name) || { name: it.name },
           position: it.position,
           insertionName: it.isInsertion ? it.name : '',
         }))
         .filter((it) => Boolean(it.member));
+      if (items.length === 0) continue; // 该日只剩保留记录，无新班次可写
       const ids = await dutyTable.createDayRecords(day.date, items);
       createdIds.push(...ids);
       const dayPlaced = [];
@@ -217,6 +245,11 @@ async function getNextDuty(memberName) {
  * @returns {object} 预览或执行结果（删除清单/义务重置/新生成概要）
  */
 async function rebalance(options = {}) {
+  // 与 generate/placePending 共用全局串行锁（rebalance 内部的生成走 generateLocked 不重复排队）
+  return withScheduleLock(() => rebalanceLocked(options));
+}
+
+async function rebalanceLocked(options = {}) {
   const confirm = Boolean(options.confirm);
   const today = todayStr();
   const all = await dutyTable.getAllDayRecords();
@@ -285,8 +318,9 @@ async function rebalance(options = {}) {
     });
   }
 
-  // 4) 从明天起重排：保留的未来已请假/未做完记录计入配额反推（占配额防同人同日重复排班）
-  const gen = await generate({
+  // 4) 从明天起重排：保留的未来已请假/未做完记录计入配额反推（占配额防同人同日重复排班），
+  //    并经 generateLocked 的 preassigned 种进日占用表（占日容量防 5 记录日，2026-09-27）
+  const gen = await generateLocked({
     dryRun: false,
     startDateStr: addDays(today, 1),
     weeklyAllowance: options.weeklyAllowance,
@@ -308,6 +342,7 @@ async function rebalance(options = {}) {
 
 module.exports = {
   generate,
+  withScheduleLock,
   renderGenerateReply,
   getBrief,
   getNextDuty,

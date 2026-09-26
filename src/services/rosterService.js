@@ -64,6 +64,15 @@ function findByName(name) {
   return loadMembers().find((m) => m.name === name) || null;
 }
 
+/** 原子写 JSON（2026-09-27，同 stateStore.save 范式）：写临时文件后改名，
+ *  进程写一半被杀不再产生半截名册/白名单（load 侧会把半截 JSON 当损坏按空处理，
+ *  名册清零 = 值日队列清零，属运行时数据事故） */
+function atomicWriteJson(file, data) {
+  const tmp = `${file}.tmp`;
+  fs.writeFileSync(tmp, JSON.stringify(data, null, 2));
+  fs.renameSync(tmp, file);
+}
+
 function findByOpenId(openId) {
   if (!openId) return null;
   return loadMembers().find((m) => m.openId && m.openId === openId) || null;
@@ -107,7 +116,7 @@ async function syncFromContacts() {
     dept: u.departments || '',
     admin: adminByName.has(u.name),
   }));
-  fs.writeFileSync(config.membersFile, JSON.stringify({ members }, null, 2));
+  atomicWriteJson(config.membersFile, { members });
   console.log(`[名册] 通讯录同步完成：共 ${members.length} 人（admin 标记保留 ${members.filter((m) => m.admin).length} 个）`);
   return members;
 }
@@ -118,7 +127,7 @@ function updateWhitelist({ add = [], remove = [] } = {}) {
   for (const n of add) if (String(n).trim()) names.add(String(n).trim());
   for (const n of remove) names.delete(String(n).trim());
   const list = [...names];
-  fs.writeFileSync(config.whitelistFile, JSON.stringify({ names: list }, null, 2));
+  atomicWriteJson(config.whitelistFile, { names: list });
   console.log(`[名册] 白名单已更新：${list.length} 人`);
   return list;
 }
@@ -140,13 +149,18 @@ function bindOpenId(name, openId) {
   }
   target = members.find((m) => m && typeof m.name === 'string' && m.name.trim() === name);
   if (!target) return { ok: false, message: `名册中没有「${name}」，请联系管理员补充名册` };
+  // 抢占防护（2026-09-27）：目标姓名已绑定其他账号时拒绝改绑——否则任何队员私信
+  // 「绑定 已绑定者姓名」即可把别人的 open_id 抢过来，代他人收值日提醒/打卡确认
+  if (target.openId && target.openId !== openId) {
+    return { ok: false, message: `「${name}」该姓名已绑定其他账号，如需改绑请联系管理员` };
+  }
   const sameIdOther = members.find((m) => m !== target && (m.openId || '') === openId);
   if (sameIdOther) {
     return { ok: false, message: `该账号已绑定给「${sameIdOther.name}」，如需改绑请联系管理员` };
   }
   target.openId = openId;
   try {
-    fs.writeFileSync(config.membersFile, JSON.stringify({ members }, null, 2));
+    atomicWriteJson(config.membersFile, { members });
   } catch (err) {
     return { ok: false, message: `名册文件不可写：${err.message}` };
   }

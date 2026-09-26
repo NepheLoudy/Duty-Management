@@ -146,16 +146,24 @@ function planInsertion({ weekStartStr, rangeStart, rangeEnd, memberName, assignm
  * @param {string} p.startDateStr 起始日（含）
  * @param {number} p.days 生成天数
  * @param {Array<{name: string, position: string, date: string}>} p.history 起始日之前的既有班次（反推配额与间隔）
+ * @param {Array<{name: string, position: string, date: string, status?: string}>} [p.preassigned]
+ *   生成前已存在、范围需保留的记录（重排保留的未来已请假/未做完班次，2026-09-27 检修）：
+ *   种进日占用表——基排按剩余容量补（严格 3 条/日不变量恢复，不再叠满 3 条新基排），
+ *   补偿插入按既有逻辑看到请假空缺位（fillLeave 同岗回填）。调用方负责这些记录不重复写表。
  * @param {Array<{name: string, weekStartStr: string}>} p.insertions 需优先安置的补偿插入（每条=1次）
  * @param {number} p.minIntervalDays 同一人两次值日最小间隔（软约束）
  * @param {number} [p.weeklyAllowance] 每周非请假位插入容量（默认 2，超出留队）
  * @param {string} p.seedStr 随机种子（同参数可复现）
  * @returns {{days: Array<{date: string, items: Array<{name: string, position: string, isInsertion: boolean}>}>, unplacedInsertions: Array, quotaReport: Array}}
  */
-function generateSchedule({ members, startDateStr, days, history = [], insertions = [], minIntervalDays = 2, weeklyAllowance, seedStr = 'duty' }) {
+function generateSchedule({ members, startDateStr, days, history = [], insertions = [], preassigned = [], minIntervalDays = 2, weeklyAllowance, seedStr = 'duty' }) {
   const rng = mulberry32(hashSeed(seedStr));
   const assignments = new Map(); // dateStr -> [{name, position, isInsertion}]
   const unplacedInsertions = [];
+
+  // 预置占用（重排保留的未来已请假/未做完记录，2026-09-27）：只进日占用表与插入快照，
+  // 不动配额（配额由调用方经 history/extraIds 反推，二者一致不双计）
+  const preseededCount = new Map(); // dateStr -> 该日预置保留记录数（基排容量扣除依据）
 
   const quotas = computeRemainingQuotas(members, history);
   const lastDuty = new Map(); // name -> 最近一次值日日期串（含历史与本次生成）
@@ -171,10 +179,23 @@ function generateSchedule({ members, startDateStr, days, history = [], insertion
 
   const hasDutyOn = (name, date) => (assignments.get(date) || []).some((it) => it.name === name);
 
+  for (const pre of preassigned) {
+    if (!pre || !pre.name || !ROUND_TARGET[pre.position] || !pre.date) continue;
+    getItems(pre.date).push({
+      name: pre.name,
+      position: pre.position,
+      isInsertion: false,
+      status: pre.status || '',
+      kept: true,
+    });
+    preseededCount.set(pre.date, (preseededCount.get(pre.date) || 0) + 1);
+  }
+
   // -- 1) 补偿插入优先安置（可突破轮次上限，该日变成 4 人） --
   // 周级容量闸门（2026-09-25 检修）：非请假位插入每周最多 allowance 条，超出留队
   // （unplacedInsertions，由 00:30 对账的 placePending 后续安置），防止欠账集中
-  // 插进生成范围头部把一周插成天天 4 人。生成场景 assignments 无 status → 无请假位。
+  // 插进生成范围头部把一周插成天天 4 人。普通生成 assignments 无 status → 无请假位；
+  // 重排场景（preassigned 预置）保留的已请假记录会被识别为请假空缺位（fillLeave 不占容量）。
   const allowance = weeklyAllowance == null ? 2 : weeklyAllowance;
   const weeklyInserted = new Map(); // weekStart -> 已用非请假位插入数
   for (const ins of insertions) {
@@ -208,9 +229,9 @@ function generateSchedule({ members, startDateStr, days, history = [], insertion
   // 按天做联合最优分配：从当日候选池枚举「三人组合 × 三岗全排列」，整体打分
   // 挑配额满足度最高的方案（欠什么岗上什么岗；错配日把偏离最小化），
   // 岗位基准顺序按日期轮换避免固定同人同岗；同分受限随机，同参数可复现。
-  const chooseDayAssignment = (pool, dayIndex) => {
+  const chooseDayAssignment = (pool, dayIndex, target) => {
     const order = POSITIONS.map((_, k) => POSITIONS[(k + dayIndex) % 3]);
-    const n = Math.min(3, pool.length);
+    const n = Math.min(target, pool.length);
     let best = null;
     let bestScore = -Infinity;
 
@@ -247,6 +268,10 @@ function generateSchedule({ members, startDateStr, days, history = [], insertion
   for (let i = 0; i < days; i++) {
     const date = addDays(startDateStr, i);
     const existing = getItems(date);
+    // 基排目标 = 3 − 该日预置保留记录数（2026-09-27）：重排保留的已请假/未做完记录
+    // 占基排容量，「严格 3 条/日」不变量由 预置 + 新基排 = 3 恢复（插入位由插入阶段额外突破）
+    const baseTarget = Math.max(0, 3 - (preseededCount.get(date) || 0));
+    if (baseTarget === 0) continue; // 该日已被保留记录占满
 
     // 当日候选：间隔软约束逐级放宽（人少时放宽），同日不重复
     let eligible = [];
@@ -259,13 +284,13 @@ function generateSchedule({ members, startDateStr, days, history = [], insertion
         if (last && last < date && diffDays(date, last) <= interval) return false;
         return true;
       });
-      if (eligible.length >= 3 || interval === 0) break;
+      if (eligible.length >= baseTarget || interval === 0) break;
     }
     if (eligible.length === 0) continue;
 
     // 个别成员本轮配额已尽：仅让这些人提前进入下一轮（缺口即时衔接，天不缺员）
     let pool = eligible.filter((m) => quotas.get(m.name).remainingTotal > 0);
-    if (pool.length < Math.min(3, eligible.length)) {
+    if (pool.length < Math.min(baseTarget, eligible.length)) {
       for (const m of members) {
         const q = quotas.get(m.name);
         if (q.remainingTotal === 0) {
@@ -276,7 +301,7 @@ function generateSchedule({ members, startDateStr, days, history = [], insertion
       pool = eligible;
     }
 
-    const chosen = chooseDayAssignment(pool, i);
+    const chosen = chooseDayAssignment(pool, i, baseTarget);
     for (const c of chosen) {
       const q = quotas.get(c.name);
       if (q.remaining[c.position] > 0) { q.remaining[c.position] -= 1; q.remainingTotal -= 1; }
