@@ -38,12 +38,13 @@ const TABLES = [
     { field_name: '功能数', type: 2, property: { formatter: '0' } },
   ] },
   // 「快递」表（2026-09-17 快递助手）：用户手工建（发起人=用户主键/快递内容=附件/
-  // 取件码/是否取件 未取·已取），脚本只幂等补缺失列（登记时间/取件时间/消息ID）；
+  // 取件码/是否取件 未取·已取），脚本只幂等补缺失列（登记时间/取件时间/消息ID/备注）；
   // /快递 窗口登记 → 每小时未取播报 → 「已取n/全部已取」确认回写
   { name: '快递', primaryName: '发起人', fields: [
     { field_name: '登记时间', type: 5, property: { date_formatter: 'yyyy/MM/dd HH:mm' } },
     { field_name: '取件时间', type: 5, property: { date_formatter: 'yyyy/MM/dd HH:mm' } },
     { field_name: '消息ID', type: 1 },
+    { field_name: '备注', type: 1 },
   ] },
 ];
 
