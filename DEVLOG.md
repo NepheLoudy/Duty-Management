@@ -3,7 +3,7 @@
 > 版本隔离单位 = 一次 `npm run push`（即一次 git 提交 + 一次部署）。
 > 每次 push 完成后在文末追加：`## vN · YYYY-MM-DD · <提交哈希> · <类型>`，
 > 正文为提交说明原文 + 实际改动要点。vN 只增不复用，历史条目不改写。
-> 当前最新：**v47**（2026-10-07，`54d1c76`，断网失败自动重试+请假连续加罚恢复+周插入容量持久计数三件套）。上一版 v46（2026-10-07，`3d3246d`，当日中午提醒补位）。上一版 v45（2026-10-07，`1ac2d87`，提前预告扩容 D-7/D-3 双锚点）。上一版 v44（2026-10-07，`d8557a6`，NAS_*→DEPLOY_* 连接键改名批）。上一版 v43（2026-09-28，快递表「备注」列建表脚本补列，已执行生产补列）。 上一版 v42（2026-09-27，`5f24be7`，已上线）。上一版 v41（push.js ENOENT 兼容）。上一版 v40（全量审查修复批，`33ab617`）。上一版 v39（deferred spread 时序修复，`60654f0`）。上一版 v38（对账文案+文档批，`7781ee1`）。更早：v37（b8db8a6，09-25 值日全面检修）、v36（7a7a361，09-24 值日公平性批）。
+> 当前最新：**v48**（2026-10-07，随本提交落地，ZKLink 打卡时长周报归并批——独立仓 zklink-attendance-bot 并入 src/zklink/）。上一版 v47（2026-10-07，`54d1c76`，断网失败自动重试+请假连续加罚恢复+周插入容量持久计数三件套）。上一版 v46（2026-10-07，`3d3246d`，当日中午提醒补位）。上一版 v45（2026-10-07，`1ac2d87`，提前预告扩容 D-7/D-3 双锚点）。上一版 v44（2026-10-07，`d8557a6`，NAS_*→DEPLOY_* 连接键改名批）。上一版 v43（2026-09-28，快递表「备注」列建表脚本补列，已执行生产补列）。 上一版 v42（2026-09-27，`5f24be7`，已上线）。上一版 v41（push.js ENOENT 兼容）。上一版 v40（全量审查修复批，`33ab617`）。上一版 v39（deferred spread 时序修复，`60654f0`）。上一版 v38（对账文案+文档批，`7781ee1`）。更早：v37（b8db8a6，09-25 值日全面检修）、v36（7a7a361，09-24 值日公平性批）。
 
 
 
@@ -472,3 +472,15 @@
 - 测试：flow 7.5 改新加罚口径（连续请假第二次触发加罚/账目 3 条/streak 清零）+ 新增 7.7 周容量持久计数用例；policy 新增 ③.6 失败重试/耗尽转补报/notifier 清账四断言；schedule 新增 3.5 账目初值（已满留队/半满插 1/回填豁免）三断言；七套 stub 全绿（exit 0）。
 - 部署须知：存量超员（10-08~10-20 已写表的 4-5 人日）不会自动消失，如需消化走 `/api/bot/rebalance`（重排后义务按新口径逐周安置，每周最多 +2 非回填）；15 条未安置义务按新口径排队消化（约 2 条/周 + 回填位），要提速可临时调大 `DUTY_WEEKLY_INSERTION_ALLOWANCE`。
   **拍板（2026-10-07 曼波）**：不跑 rebalance、不调容量——存量超员随日期自然过去（10-21 起回落 3 人/天），未安置义务按 2 条/周 + 回填位慢慢消，defer 链在每晚对账报告可见。10-05 断网当晚被收口「未做完」的记录保持原样（含王义辰），补偿义务照常登记。
+
+### v48 · 2026-10-07 · 随本提交落地 · feat
+
+**ZKLink 打卡时长周报归并批（曼波定「复用现有应用和分发以及触发逻辑，归并到 duty-bot」）**
+
+- 背景：实验室 ZKTeco 打卡机数据上传 ZKLink 云考勤（zklink.zktecoiot.com，考勤组/规则平台侧已配好）；曼波要求每周自动统计打卡时长 → 值日群 webhook 播报 → 云文档留档全部记录。本批将当日早些时候的独立仓 zklink-attendance-bot（顶层 v139 开仓，:3017）整体归并进本仓 `src/zklink/`，独立仓删除。
+- **复用三件（归并核心）**：①云文档留档应用身份复用 `APP_ID/APP_SECRET`（wiki 节点 token 经 get_node 换算，ZKLINK_ARCHIVE_DOC_TOKEN，曼波指定 NFUS…）；②播报分发复用值日看板同一条群 webhook（曼波确认 `DUTY_BOARD_WEBHOOK_URL` 即他要的那条，`ZKLINK_WEBHOOK_URL` 可覆盖）；③触发复用 cron/index.js 的 gateTask 体系（静默闸门/积压/失败重试/管理员补报全自动继承）。
+- 新增模块 `src/zklink/`（config/report/importService/zklinkClient/store/feishuDoc/card/service 八件）：周播 `ZKLINK_BROADCAST_CRON`（默认周一 09:30 上海）+ 每小时 5 分自判补发对表（gateTask 积压只管静默窗口内错过，进程死了的漏播由 watchdog 兜住；首启无水位不补发防部署即广播）；时长口径=按人按上海挂钟日「末卡−首卡」、孤条不计、跨零点切断；播报与云文档留档独立水位（重试只补未完成通道；留档未配置=skipped，本地 duty-bot-data/zklink/archive/ JSON 全量+CSV 兜底）。
+- 数据源双通道：`import` 默认（ZKLink 网页端考勤组维度导出 → POST /api/attendance/import，容错列匹配兼容「打卡时间」单列与「日期+时间」分列，多时间列统计模板明确报错挡下）；`http` 直拉（平台=qiankun 微前端壳+OAuth Bearer 指纹，端点候选内置，凭据到位后 `node scripts/zklink-probe.js` 校准回填再切）。
+- 端点挂 :3006（`/api/attendance/policy|members|import|preview|test-broadcast`，鉴权复用 API_TOKEN）；打卡名单并入打卡 state（不新增 push 私有配置守卫面）；`.env` 新增 ZKLINK_* 十一键（ZKLINK_DATA_DIR=C:/home/qianli/duty-bot-data/zklink 等）；xlsx 入依赖；push.js 闸门改 `npm run test` 聚合（新建）+ tar 排除补 `.zklink-state.json`/`zklink-data`。
+- 测试：新增 6 套 120 断言（窗口 17/时长 22/导入 24/客户端 28/卡片块 15/留档 14），全仓 13 套全绿；冒烟验证周播/watchdog cron 挂载与原值日功能无恙。踩坑：`feishuDoc` 初版漏导出 `appendDocBlocks`（桩测试当场拦下）；duty-bot cron 为 6 段式（含秒），zklink cron 解析兼容 5/6 段。
+- 遗留：①云文档留档激活需给共用应用开 docx 权限 + wiki 只读 + 加为留档文档协作者（飞书后台人工，未配时本地兜底、卡片照发）；②http 直拉待曼波提供 ZKLink 账号（probe 校准）；③每周播报前需有人完成 ZKLink 网页端导出+导入（或配好 http 通道后全自动）。

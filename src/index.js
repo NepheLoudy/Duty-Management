@@ -262,6 +262,140 @@ app.get('/api/bot/cron-status', (req, res) => {
   res.json(getCronStatus());
 });
 
+// ============================================================
+// ZKLink 打卡时长周报（2026-10-07 v48 归并，src/zklink/）
+// 每周一 09:30 上海统计上周打卡时长 → 值日群 webhook 周报卡 + 云文档留档。
+// 不消费消息事件；端点挂本服务 :3006（鉴权复用 API_TOKEN）。
+// ============================================================
+const zklinkConfig = require('./zklink/config');
+const zklinkStore = require('./zklink/store');
+const zklinkClient = require('./zklink/zklinkClient');
+const zklinkReport = require('./zklink/report');
+const zklinkImport = require('./zklink/importService');
+const zklinkFeishuDoc = require('./zklink/feishuDoc');
+const zklinkCard = require('./zklink/card');
+const zklinkService = require('./zklink/service');
+const quietHoursZk = require('./utils/quietHours');
+
+// ---- 定制窗口：打卡域政策全景只读 ----
+app.get('/api/attendance/policy', (req, res) => {
+  const win = zklinkReport.weekWindow(0, Date.now(), zklinkConfig.cronParts.dow == null ? 1 : zklinkConfig.cronParts.dow);
+  let imported = null;
+  let stateSummary = {};
+  try {
+    const st = zklinkStore.loadState();
+    const { records, members, ...meta } = st.imported || {};
+    imported = Object.keys(meta).length ? { ...meta, records: (records || []).length } : null;
+    stateSummary = {
+      lastSentWeekKey: st.lastSentWeekKey || null,
+      lastArchivedWeekKey: st.lastArchivedWeekKey || null,
+      lastSentAt: st.lastSentAt || null,
+      lastError: st.lastError || null,
+      delivery: st.delivery || null,
+      imported,
+      members: (st.members || []).length,
+    };
+  } catch { /* 状态文件损坏时窗口仍可用，摘要留空 */ }
+  res.json({
+    domain: 'ZKLink 打卡时长周报（值日群，归并 duty-bot）',
+    broadcast: {
+      cron: zklinkConfig.cron,
+      timezone: zklinkConfig.timezone,
+      windowLabel: win.label,
+      windowKey: win.key,
+      quietHours: quietHoursZk.getStatus(),
+    },
+    dataSource: zklinkConfig.dataSource,
+    zklink: {
+      baseUrl: zklinkConfig.zklinkBaseUrl,
+      usernameConfigured: !!zklinkConfig.zklinkUsername,
+      attGroupId: zklinkConfig.zklinkAttGroupId || null,
+      loginPath: zklinkConfig.zklinkLoginPath,
+      transactionPath: zklinkConfig.zklinkTransactionPath,
+      httpUsable: zklinkClient.isConfigured(),
+      apiDocs: '端点为候选值：凭据到位后跑 node scripts/zklink-probe.js 校准回填，再切 ZKLINK_DATA_SOURCE=http',
+    },
+    channels: {
+      feishu: !!zklinkConfig.webhookUrl,
+      webhookSource: process.env.ZKLINK_WEBHOOK_URL ? 'ZKLINK_WEBHOOK_URL' : 'DUTY_BOARD_WEBHOOK_URL（复用值日看板同一条）',
+    },
+    archive: {
+      appConfigured: zklinkConfig.appConfigured,
+      docConfigured: !!(zklinkConfig.appConfigured && zklinkConfig.archiveDocToken),
+      archiveDir: zklinkConfig.archiveDir,
+      exportsDir: zklinkConfig.exportsDir,
+      apiDocs: 'ZKLINK_ARCHIVE_DOC_TOKEN 支持 wiki 节点 token（自动 get_node 换算）或 docx token；应用需 docx 权限且被加为文档协作者',
+    },
+    state: stateSummary,
+    apiTokenLocked: !process.env.API_TOKEN,
+  });
+});
+
+// ---- 打卡域成员增删（X-API-Token；名单在打卡 state 内，导入自动合并） ----
+app.post('/api/attendance/members', requireApiToken, (req, res) => {
+  const { action, userid, name } = req.body || {};
+  const { list, error } = zklinkStore.applyMembersChange({ action, userid, name });
+  if (error) return res.status(400).json({ error });
+  res.json({ ok: true, count: list.length, list });
+});
+
+// ---- 打卡明细导入（POST {dataBase64, filename?}；名单自动合并进打卡 state） ----
+app.post('/api/attendance/import', requireApiToken, (req, res) => {
+  const { dataBase64, filename } = req.body || {};
+  if (!dataBase64) return res.status(400).json({ error: '缺少 dataBase64（打卡明细文件字节流的 base64）' });
+  const b64 = String(dataBase64).replace(/\s+/g, '');
+  if (!/^[A-Za-z0-9+/]+={0,2}$/.test(b64) || b64.length % 4 !== 0) {
+    return res.status(400).json({ error: 'dataBase64 非法 base64' });
+  }
+  const buf = Buffer.from(b64, 'base64');
+  try {
+    const parsed = zklinkImport.parseWorkbook(buf);
+    const merged = zklinkImport.mergeMembers(zklinkStore.loadMembers(), parsed.members);
+    zklinkStore.mergeSaveState({ members: merged });
+    const st = zklinkStore.loadState();
+    // 覆盖天数按上海挂钟日（report.js toWall 口径）：UTC 直取会把上海 00:00–07:59 的打卡算到前一天
+    const days = [...new Set(parsed.records.map((r) => new Date(r.checkin_time * 1000 + zklinkReport.SHANGHAI_OFFSET_MS).toISOString().slice(0, 10)))].sort();
+    st.imported = { records: parsed.records, importedAt: new Date().toISOString(), sourceFile: String(filename || ''), count: parsed.records.length, days: `${days[0]} ~ ${days[days.length - 1]}` };
+    zklinkStore.saveState(st);
+    console.log(`[打卡周报] 导入打卡明细: ${parsed.records.length} 条（${st.imported.days}），名单 ${merged.length} 人`);
+    res.json({ ok: true, count: parsed.records.length, days: st.imported.days, members: merged.length, columnsMatched: parsed.matched, skipped: parsed.skipped });
+  } catch (err) {
+    console.error('[打卡周报] 导入解析失败:', err.message);
+    res.status(400).json({ error: err.message });
+  }
+});
+
+// ---- 干跑预览（含云文档留档块数预览） ----
+app.get('/api/attendance/preview', async (req, res) => {
+  const offset = Number(req.query.weekOffset || 0) || 0;
+  try {
+    const r = await zklinkService.runWeekly({ offset, dryRun: true });
+    const docBlocks = zklinkFeishuDoc.buildDocBlocks(r.window, r.agg, r.agg.rawRecords, {});
+    res.json({
+      ok: true,
+      window: r.window.label,
+      totals: r.totals,
+      cardMarkdown: zklinkCard.buildWeeklyCard(r.window, r.agg).elements[0].content,
+      userLines: zklinkReport.renderUserLines(r.agg),
+      csvPreview: r.csv.split('\r\n').slice(0, 6),
+      docBlocksPreview: { count: docBlocks.length, head: docBlocks.slice(0, 6).map((b) => (b.text ? b.text.elements[0].text_run.content : `heading#${b.block_type - 2}`)) },
+    });
+  } catch (err) {
+    res.status(err.errcode === 'NO_CONFIG' ? 503 : 502).json({ error: err.message, hint: err.hint || null });
+  }
+});
+
+// ---- 手动播报+留档（真发/dryRun，X-API-Token；当下主动触发不受静默限制） ----
+app.post('/api/attendance/test-broadcast', requireApiToken, async (req, res) => {
+  const { weekOffset = 0, dryRun = false } = req.body || {};
+  try {
+    const r = await zklinkService.guardedRun({ offset: Number(weekOffset) || 0, dryRun: !!dryRun, trigger: 'manual' });
+    res.json({ ok: true, sent: r.sent, window: r.window.label, totals: r.totals, filename: r.filename });
+  } catch (err) {
+    res.status(err.errcode === 'NO_CONFIG' ? 503 : 502).json({ error: err.message, hint: err.hint || null });
+  }
+});
+
 // ---------- 启动 ----------
 
 function startServer() {

@@ -8,6 +8,8 @@ const assistant = require('../services/assistantService');
 const express = require('../services/expressService');
 const roster = require('../services/rosterService');
 const bot = require('../feishu/bot');
+const zklinkService = require('../zklink/service');
+const zklinkConfig = require('../zklink/config');
 
 // ============================================================
 // 定时任务（node-cron 6 段式 + Asia/Shanghai）：
@@ -82,6 +84,19 @@ function startCronJobs() {
   // 冲刷补发时以补发时刻最新数据重查——夜间已被取完的不再播；静默窗口内同名积压
   // 合并只留最新槽位，09:00 冲刷只补跑一次）
   tasks.push(scheduleTask(config.express.broadcastSchedule, 'duty_express_broadcast', '快递未取播报', quietTaskRunners.duty_express_broadcast));
+
+  // ZKLink 打卡时长周报（2026-10-07 v48 归并）：周播周一 09:30 上海播上一周 → 值日群
+  // webhook 周报卡 + 云文档留档；过静默闸门（可重扫型，积压冲刷重跑 runner 以最新
+  // 状态重查）。整点对表 watchdog 是自判补发型（gateTask 积压只管「静默窗口内错过」，
+  // 不管「进程死了」——已过发送时刻且水位落后才动作，否则静默返回），runner 自身
+  // 幂等（水位门控），静默窗口内被积压合并冲刷也无副作用。
+  if (zklinkConfig.enabled) {
+    const zklinkBroadcast = () => zklinkService.guardedRun({ trigger: 'cron' }).catch(() => {});
+    quietTaskRunners.duty_zklink_broadcast = zklinkBroadcast;
+    tasks.push(scheduleTask(zklinkConfig.cron, 'duty_zklink_broadcast', '打卡时长周报', zklinkBroadcast));
+    quietTaskRunners.duty_zklink_watchdog = () => zklinkService.watchdogTick();
+    tasks.push(scheduleTask('0 5 * * * *', 'duty_zklink_watchdog', '打卡周报补发对表', quietTaskRunners.duty_zklink_watchdog));
+  }
 
   // 收口：写表动作不延迟（不进 gateTask），仅通知载荷过闸门。
   // 24:00（0 点）收口已跨日：closeToday 默认取「今天」会落空——归属日按上海墙上时钟

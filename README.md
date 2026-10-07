@@ -97,6 +97,8 @@
 | D 日 24:00（午夜） | 收口 | 未「打卡」置未做完（只传照片没打卡同样置未做完并回执提示）；算当日总状态；生成补偿义务。**写表动作不延迟**，仅回执通知过闸门；2026-09-17 起 22:00→24:00（大家下班晚），0 点跨日由程序自动归属值日当天 |
 | 每日 00:30 | 对账 | 重算昨日总状态（兼容手工改表）、核对补偿插入义务（未安置补插/满周顺延下周）、回执管理员 |
 | 每小时整点 | 快递未取播报 | 「快递」表当前未取清单（取件码+编号）发快递群（`EXPRESS_BROADCAST_SCHEDULE`，2026-09-17 快递助手）；无未取跳过不发 |
+| 周一 09:30 | 打卡时长周报 | ZKLink 打卡机上周打卡时长统计（按人按日「末卡−首卡」，孤条不计）→ 值日群 webhook 周报卡 + 飞书云文档留档（v48 归并，`ZKLINK_BROADCAST_CRON`，见下方专节） |
+| 每小时 5 分 | 打卡周报补发对表 | 已过本周发送时刻且水位落后才动作（gateTask 积压只管「静默窗口内错过」，进程死了的漏播由这里兜住；首启无水位不补发） |
 | 每日 12:00 | 看板自动播报 | 值日看板卡片（**今日三岗 + 昨日战报，一个面板同时播昨天今天**）经群自定义机器人 webhook 推到值日播报群；未配置 webhook 或推送失败时回退应用身份直发管辖群（两者都不可用才跳过）；无排班记录跳过 |
 
 晚间静默窗口（默认 02:00–09:00）内：提醒/询问/对账登记积压、09:00 整点以最新数据重跑；
@@ -137,6 +139,35 @@
   `EXPRESS_BROADCAST_SCHEDULE` / `EXPRESS_TABLE_ID`（默认已内置）/ `EXPRESS_ENABLED`。
 - 桩测试：`scripts/stub-test-express.js`（29 项：窗口/登记/配对/去重/编号/取件/播报）。
 
+## ZKLink 打卡时长周报（2026-10-07 v48 归并，src/zklink/）
+
+实验室 ZKTeco 打卡机上传 **ZKLink 云考勤**（`zklink.zktecoiot.com`，考勤组/规则平台侧已配好），
+本模块每周自动统计打卡时长 → 值日群 webhook 播报 → 飞书云文档留档本次全部记录。
+（原独立仓 `zklink-attendance-bot` 同日归并废止：复用本仓应用身份做 docx 留档、复用
+`DUTY_BOARD_WEBHOOK_URL` 分发、复用 gateTask 触发体系。）
+
+- **时长口径**：按人按上海挂钟日聚合，单日 ≥2 条打卡记「末卡 − 首卡」，恰 1 条记 0（标「孤条」
+  不计时长），周合计；跨零点通宵按挂钟日切断；平台考勤组/班次不影响本口径；
+- **周报卡**：每人「打卡 N 天 · 合计时长 · 孤条数」，有孤条/缺勤橙色头；经值日看板同一条
+  群 webhook 发送（`ZKLINK_WEBHOOK_URL` 可覆盖，缺省回落 `DUTY_BOARD_WEBHOOK_URL`）；
+- **云文档留档**：每周一节（heading2 周标题 → 口径/合计 → 本周汇总逐人 → 打卡明细逐条），
+  `ZKLINK_ARCHIVE_DOC_TOKEN` 兼容 wiki 节点 token（自动 get_node 换算，需应用 wiki 只读权限）
+  与 docx token；应用身份复用 `APP_ID/APP_SECRET`（需 docx 权限 + 应用被加为文档协作者）；
+  未配置时本地兜底、卡片照发；本地 `duty-bot-data/zklink/archive/` 每周落盘 JSON 全量 + CSV；
+- **数据源双通道**（`ZKLINK_DATA_SOURCE`）：`import` 默认——ZKLink 网页端（考勤 → 打卡记录，
+  按考勤组）导出 xlsx/csv → `POST /api/attendance/import` 上传（容错列匹配，兼容「打卡时间」
+  单列与「日期+时间」两列分列，多时间列统计模板明确报错挡下）；`http` 直拉——平台是 qiankun
+  微前端壳 + OAuth Bearer 指纹，真实端点待校准：`.env` 填 `ZKLINK_USERNAME/PASSWORD` →
+  `node scripts/zklink-probe.js` → 按输出回填 `ZKLINK_LOGIN_PATH/ZKLINK_TRANSACTION_PATH` 再切；
+- **水位**：`lastSentWeekKey`/`delivery {feishu, archived}` 在打卡 state（`ZKLINK_STATE_FILE`，
+  部署目标放 duty-bot-data/zklink/）；播报与留档独立水位，重试只补未完成通道；首次成功前
+  无水位不自动补发（防部署即广播）；
+- **名单**：打卡 state 内 `members`（导入自动派生合并 + `/api/attendance/members` 手工增删），
+  不设独立私有配置文件；
+- 桩测试：`stub-test-zklink*.js` 6 套 120 断言（窗口 17 / 时长聚合 22 / 导入 24 / 客户端 28 /
+  卡片块 15 / 留档 wiki 换算与分批 14）；
+- 已知边界：云文档追加成功但响应丢失的极端场景，重试可能追加重复小节（概率极低，人肉删即可）。
+
 ## API
 
 | 方法 | 路径 | 说明 |
@@ -154,6 +185,11 @@
 | POST | `/api/bot/test-generate` / `test-board` | 手动触发（**默认即预览**，body `{"confirm":true}` 才正式生成/实发） |
 | POST | `/api/bot/rebalance` | 排班重排（2026-09-25）：默认预览删除/义务重置清单，`{"confirm":true}` 执行（先自动全量备份） |
 | GET | `/api/bot/cron-status` | 定时任务与静默状态 |
+| GET | `/api/attendance/policy` | 打卡周报定制窗口：数据源/考勤组/通道配置/名单/水位全景（只读） |
+| POST | `/api/attendance/members` | 打卡播报名单增删 `{action:add/remove, userid, name}`（X-API-Token） |
+| POST | `/api/attendance/import` | 打卡明细导入 `{dataBase64, filename?}`（X-API-Token；解析入库+名单自动合并） |
+| GET | `/api/attendance/preview?weekOffset=N` | 打卡周报干跑预览（拉数渲染不发送，含云文档块数） |
+| POST | `/api/attendance/test-broadcast` | 打卡周报手动播报+留档 `{dryRun?, weekOffset?}`（X-API-Token） |
 
 ## 配置
 
