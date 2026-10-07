@@ -139,7 +139,7 @@ function check(name, cond, extra = '') {
   check('通讯录外成员 userid 兜底姓名', gm5.members[1].name === 'u_ghost', JSON.stringify(gm5.members[1]));
 
   console.log('\n== 6. 组选择回退：唯一组自动取用 / 响应无成员给 reason ==');
-  delete process.env.ZKLINK_ATT_GROUP_NAME;
+  process.env.ZKLINK_ATT_GROUP_NAME = ''; // 空串遮蔽 .env 真值（dotenv 兜底不覆盖已存在 env）
   delete require.cache[require.resolve('../src/zklink/config')];
   delete require.cache[require.resolve('../src/zklink/feishuAttendance')];
   const att6 = require('../src/zklink/feishuAttendance');
