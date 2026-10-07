@@ -157,8 +157,11 @@
 - **数据源双通道**（`ZKLINK_DATA_SOURCE`）：`import` 默认——ZKLink 网页端（考勤 → 打卡记录，
   按考勤组）导出 xlsx/csv → `POST /api/attendance/import` 上传（容错列匹配，兼容「打卡时间」
   单列与「日期+时间」两列分列，多时间列统计模板明确报错挡下）；`http` 直拉——平台是 qiankun
-  微前端壳 + OAuth Bearer 指纹，真实端点待校准：`.env` 填 `ZKLINK_USERNAME/PASSWORD` →
-  `node scripts/zklink-probe.js` → 按输出回填 `ZKLINK_LOGIN_PATH/ZKLINK_TRANSACTION_PATH` 再切；
+  微前端壳 + OAuth Bearer 指纹。**飞书 SSO 登录的账号（曼波）无独立密码**，走静态 token 模式：
+  浏览器登录 ZKLink → F12 → Application → Local Storage（或 Network 任意请求头
+  `Authorization: Bearer xxx`）抠 access_token → 填 `.env` `ZKLINK_ACCESS_TOKEN` →
+  切 `ZKLINK_DATA_SOURCE=http`；token 过期周报失败告警提醒再贴。有独立账密的账号才走
+  `node scripts/zklink-probe.js` 端点校准；
 - **水位**：`lastSentWeekKey`/`delivery {feishu, archived}` 在打卡 state（`ZKLINK_STATE_FILE`，
   部署目标放 duty-bot-data/zklink/）；播报与留档独立水位，重试只补未完成通道；首次成功前
   无水位不自动补发（防部署即广播）；

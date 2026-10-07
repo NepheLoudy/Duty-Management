@@ -16,13 +16,13 @@ const config = require('./config');
 let tokenCache = { token: '', expiresAt: 0 };
 
 function isConfigured() {
-  return !!(config.zklinkUsername && config.zklinkPassword);
+  return !!(config.zklinkAccessToken || (config.zklinkUsername && config.zklinkPassword));
 }
 
 function noConfig() {
-  const err = new Error('未配置 ZKLINK_USERNAME / ZKLINK_PASSWORD（.env），http 数据源不可用');
+  const err = new Error('未配置 ZKLINK_ACCESS_TOKEN（飞书 SSO 账号贴 token）或 ZKLINK_USERNAME/PASSWORD（账密候选），http 数据源不可用');
   err.errcode = 'NO_CONFIG';
-  err.hint = '先跑 node scripts/zklink-probe.js 用真实账号校准端点';
+  err.hint = '飞书 SSO 登录的账号：浏览器登录 ZKLink 后 F12 抠 access_token 填 ZKLINK_ACCESS_TOKEN；有独立账号密码才跑 node scripts/zklink-probe.js 校准';
   return err;
 }
 
@@ -34,6 +34,9 @@ function extractToken(j) {
 
 async function login() {
   if (!isConfigured()) throw noConfig();
+  // 静态 token 模式：跳过登录端点直接用（飞书 SSO 账号的唯一可行路径；过期由
+  // fetchTransactions 的 HTTP 错误暴露 → 周报失败告警提醒再贴）
+  if (config.zklinkAccessToken) return config.zklinkAccessToken;
   if (tokenCache.token && Date.now() < tokenCache.expiresAt - 5 * 60 * 1000) return tokenCache.token;
   const res = await fetch(config.zklinkBaseUrl + config.zklinkLoginPath, {
     method: 'POST',

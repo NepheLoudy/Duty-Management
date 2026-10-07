@@ -26,6 +26,10 @@ const config = {
   zklinkBaseUrl: (process.env.ZKLINK_BASE_URL || 'https://zklink.zktecoiot.com').replace(/\/+$/, ''),
   zklinkUsername: process.env.ZKLINK_USERNAME || '',
   zklinkPassword: process.env.ZKLINK_PASSWORD || '',
+  // 静态 token 模式（2026-10-07 曼波反馈：其 ZKLink 账号走飞书 SSO 登录，无独立密码，
+  // 账密自动登录走不通）——浏览器登录后 F12 抠 access_token 填这里，机器人直接带它
+  // 拉数；token 过期后周报失败告警提醒再贴一次。填了则优于此账密候选。
+  zklinkAccessToken: process.env.ZKLINK_ACCESS_TOKEN || '',
   // 候选端点：zklink.zktecoiot.com 是 qiankun 微前端壳（考勤模块 zkbio_att 动态挂载），
   // 登录/拉数真实路径未经凭据验证——凭据到位后跑 scripts/stub-zklink-probe.js 校准回填
   zklinkLoginPath: process.env.ZKLINK_LOGIN_PATH || '/oauth/token',
