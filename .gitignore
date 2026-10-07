@@ -33,3 +33,7 @@ data/
 *.swp
 *.swo
 config/policy-override.json
+
+# ZKLink 打卡周报运行时数据（含成员姓名+打卡记录 PII，勿提交；部署目标放项目外 duty-bot-data/zklink/）
+zklink-data/
+.zklink-state.json

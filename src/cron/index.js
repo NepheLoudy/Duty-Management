@@ -91,7 +91,9 @@ function startCronJobs() {
   // 不管「进程死了」——已过发送时刻且水位落后才动作，否则静默返回），runner 自身
   // 幂等（水位门控），静默窗口内被积压合并冲刷也无副作用。
   if (zklinkConfig.enabled) {
-    const zklinkBroadcast = () => zklinkService.guardedRun({ trigger: 'cron' }).catch(() => {});
+    // 不吞错：失败交给 gateTask 重试链+管理员补报（与全仓 runner 口径一致）；
+    // guardedRun 内部已有同周一次的告警去重（alertedWeekKey），不会重复轰炸
+    const zklinkBroadcast = () => zklinkService.guardedRun({ trigger: 'cron' });
     quietTaskRunners.duty_zklink_broadcast = zklinkBroadcast;
     tasks.push(scheduleTask(zklinkConfig.cron, 'duty_zklink_broadcast', '打卡时长周报', zklinkBroadcast));
     quietTaskRunners.duty_zklink_watchdog = () => zklinkService.watchdogTick();

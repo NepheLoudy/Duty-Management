@@ -113,10 +113,14 @@ async function runWeekly({ offset = 0, dryRun = false, trigger = 'cron' } = {}) 
 
   const pending = done.feishu !== true || done.archived === false || done.archived == null;
   if (pending) {
-    store.mergeSaveState({
-      delivery: done,
-      lastError: { weekKey: win.key, at: new Date().toISOString(), message: failed.join('；') },
-    });
+    // delivery/lastError 只在目标周=当前周期键时落盘：手动带 weekOffset>0 补历史周
+    // 部分失败时不得覆写当前周投递快照（否则当前周已完成通道被污染、再跑会重发）
+    if (win.key === report.weekWindow(0, Date.now(), sendDowOrDefault()).key) {
+      store.mergeSaveState({
+        delivery: done,
+        lastError: { weekKey: win.key, at: new Date().toISOString(), message: failed.join('；') },
+      });
+    }
     throw new Error(`部分通道未完成: ${failed.join('；')}`);
   }
 
@@ -144,7 +148,12 @@ async function guardedRun(opts) {
   } catch (err) {
     console.error(`[打卡周报] 播报失败:`, err.message, err.hint || '');
     const win = report.weekWindow(opts.offset || 0, Date.now(), sendDowOrDefault());
-    if (!opts.dryRun) await alertFailure(err, win, { manual: opts.trigger === 'manual' });
+    if (!opts.dryRun) {
+      // 失败先落 lastError（带周键）再告警——alertFailure 的同周去重依赖它，
+      // 否则数据源类失败（NO_CONFIG/权限缺失）会绕过去重、watchdog 每次重试都轰炸群
+      store.mergeSaveState({ lastError: { weekKey: win.key, at: new Date().toISOString(), message: err.message } });
+      await alertFailure(err, win);
+    }
     throw err;
   } finally {
     running = false;
@@ -152,9 +161,10 @@ async function guardedRun(opts) {
 }
 
 // 失败告警：向 webhook 喊话（挂了则只落 lastError 供巡检）。
-// 手动触发（manual）不受静默限制；自动链路的静默由 cron 层 gateTask 把关，
-// 这里同周只喊一次（watchdog 会静默重试）。
-async function alertFailure(err, win, { manual = false } = {}) {
+// 同周只喊一次（watchdog 会静默重试）；调用方（guardedRun）已先落 lastError，
+// 去重条件据此生效。静默时机由 cron 层 gateTask 把关（runner 不再吞错，
+// 失败重试与管理员补报由 gateTask 体系接管）。
+async function alertFailure(err, win) {
   const st = store.loadState();
   if (st.lastError && st.lastError.weekKey === win.key && st.alertedWeekKey === win.key) return;
   store.mergeSaveState({ alertedWeekKey: win.key });

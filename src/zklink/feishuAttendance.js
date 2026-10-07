@@ -19,13 +19,20 @@ const config = require('./config');
 const { getTenantAccessToken } = require('../feishu/client');
 
 const OPEN_API = 'https://open.feishu.cn/open-apis';
-const BATCH_USER_LIMIT = 100; // user_flows/query 单批 user_ids 上限（官方限制内取保守值）
+const BATCH_USER_LIMIT = 50; // user_flows/query 单批 user_ids 上限=50（官方文档明示，2026-10-07 审查修正：原 100 超限）
+
+// 统一 JSON 解析：代理返 HTML 等非 JSON 响应时给可读错误（同 feishu/webhook.js 模式）
+async function readJson(res) {
+  const j = await res.json().catch(() => null);
+  if (!j) throw new Error(`飞书考勤接口返回非 JSON 响应（HTTP ${res.status}）`);
+  return j;
+}
 
 function feishuAttError(code, msg) {
   const err = new Error(`飞书考勤接口错误 ${code}: ${msg || ''}`);
   err.errcode = code;
   if (code === 99991672) {
-    err.hint = '应用缺考勤权限：打开 duty-bot .env 里记录的一键开通链接（attendance:rule:readonly 等），在飞书开放平台给本应用开通后重试';
+    err.hint = '应用缺考勤权限：在飞书开放平台给本应用开通报错信息中列出的 scope（如 attendance:task:readonly / attendance:rule:readonly），或直接点开报错里自带的一键开通链接';
   }
   return err;
 }
@@ -47,7 +54,7 @@ async function listUsersWithUserId() {
         signal: AbortSignal.timeout(20000),
         headers: { Authorization: `Bearer ${token}` },
       });
-      const j = await res.json();
+      const j = await readJson(res);
       if (j.code !== 0) throw feishuAttError(j.code, j.msg);
       const list = (j.data && j.data.items) || [];
       for (const u of list) {
@@ -72,7 +79,7 @@ async function listGroups() {
       signal: AbortSignal.timeout(20000),
       headers: { Authorization: `Bearer ${token}` },
     });
-    const j = await res.json();
+    const j = await readJson(res);
     if (j.code !== 0) throw feishuAttError(j.code, j.msg);
     for (const g of (j.data && j.data.items) || []) {
       groups.push({ groupId: g.group_id, groupName: g.group_name, memberCount: g.member_count });
@@ -113,7 +120,7 @@ async function fetchFlows(startMs, endMs) {
         check_time_to: String(Math.floor(endMs / 1000)),
       }),
     });
-    const j = await res.json();
+    const j = await readJson(res);
     if (j.code !== 0) throw feishuAttError(j.code, j.msg);
     for (const f of ((j.data && j.data.user_flow_results) || [])) {
       const t = Number(f.check_time);

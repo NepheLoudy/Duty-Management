@@ -106,11 +106,10 @@ check('缺人 → null', zklink.normalizeRecord({ punchTime: 1791657600 }) === n
   delete require.cache[require.resolve('../src/zklink/config')]; // config 必须一起重载（zklinkAccessToken 在 require 时读 env）
   process.env.ZKLINK_ACCESS_TOKEN = 'static-tok-123';
   const zklink3 = require('../src/zklink/zklinkClient');
-  process.env.ZKLINK_ACCESS_TOKEN = 'static-tok-123';
-  const tokenCalls = [];
+  const calls8 = [];
   global.fetch = async (url, init) => {
     const u = String(url);
-    tokenCalls.push(u);
+    calls8.push({ url: u, headers: init && init.headers ? init.headers : null });
     if (u.includes('/oauth/token')) return { status: 500, json: async () => ({ error: 'login should not be called' }) };
     if (u.includes('/transaction/list')) {
       return { status: 200, json: async () => ({ data: { records: [{ name: '张三', empNo: 'E1', punchTime: '2026-10-05 08:55:00' }] } }) };
@@ -119,10 +118,9 @@ check('缺人 → null', zklink.normalizeRecord({ punchTime: 1791657600 }) === n
   };
   const r8 = await zklink3.fetchTransactions(Date.UTC(2026, 9, 4, 16, 0), Date.UTC(2026, 9, 11, 16, 0));
   check('静态 token 直接拉数成功', r8.records.length === 1, JSON.stringify(r8.records));
-  check('未调用登录端点', !tokenCalls.some((u) => u.includes('/oauth/token')), JSON.stringify(tokenCalls));
-  const tx8 = tokenCalls.find((u) => u.includes('/transaction/list'));
-  const authHeader = (tx8 && tokenCalls.indexOf(tx8) >= 0) ? 'checked-below' : '';
-  check('拉数带静态 Bearer token', authHeader === 'checked-below'); // Authorization 头在 init 里，下面用 calls 等价断言
+  check('未调用登录端点', !calls8.some((c) => c.url.includes('/oauth/token')), JSON.stringify(calls8.map((c) => c.url)));
+  const tx8 = calls8.find((c) => c.url.includes('/transaction/list'));
+  check('拉数带静态 Bearer token（真验 Authorization 头）', !!(tx8 && tx8.headers && tx8.headers.Authorization === 'Bearer static-tok-123'), JSON.stringify(tx8 && tx8.headers));
   delete process.env.ZKLINK_ACCESS_TOKEN;
   check('isConfigured 恢复按账密判定', zklink3.isConfigured() === true); // USERNAME/PASSWORD 仍在 env
 

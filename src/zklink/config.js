@@ -59,20 +59,26 @@ const config = {
 config.cronParts = parseCron(config.cron);
 
 // 兼容 6 段（秒 分 时 日 月 周，duty-bot 全仓口径）与 5 段（分 时 日 月 周）；
-// 解析不出回退周一 09:30。秒位忽略（补发判定只需 分/时/周几）。
+// 解析不出回退周一 09:30 并 warn（watchdog 补发判定与 cron 实际口径错位时必须可见）。
+// 注意：不支持列表/步进（如 "1-5"、"*/2"）——需要时显式列多个 cron 键。
 function parseCron(expr) {
   const fallback = { minute: 30, hour: 9, dow: 1, parsed: false };
   const f = String(expr || '').trim().split(/\s+/);
-  if (f.length !== 5 && f.length !== 6) return fallback;
+  if (f.length !== 5 && f.length !== 6) return warnFallback(expr, '字段数不是 5/6');
   const m = f.length === 6 ? 1 : 0; // 6 段时整体右移一位
-  if (!/^\d{1,2}$/.test(f[m]) || !/^\d{1,2}$/.test(f[m + 1])) return fallback;
-  if (f[m + 2] !== '*' || f[m + 3] !== '*') return fallback;
-  if (f[m + 4] !== '*' && !/^\d{1,2}$/.test(f[m + 4])) return fallback;
+  if (!/^\d{1,2}$/.test(f[m]) || !/^\d{1,2}$/.test(f[m + 1])) return warnFallback(expr, '分/时含非数字');
+  if (f[m + 2] !== '*' || f[m + 3] !== '*') return warnFallback(expr, '日/月非 *（本模块只支持周播形态）');
+  if (f[m + 4] !== '*' && !/^\d{1,2}$/.test(f[m + 4])) return warnFallback(expr, `周字段 "${f[m + 4]}" 含列表/步进（不支持）`);
   const minute = Number(f[m]);
   const hour = Number(f[m + 1]);
   const dow = f[m + 4] === '*' ? null : Number(f[m + 4]) % 7; // 0/7 都算周日
-  if (minute > 59 || hour > 23) return fallback;
+  if (minute > 59 || hour > 23) return warnFallback(expr, '分/时越界');
   return { minute, hour, dow, parsed: true };
 }
 
-module.exports = config;
+function warnFallback(expr, why) {
+  console.warn(`[打卡周报] ZKLINK_BROADCAST_CRON="${expr}" 无法精确解析（${why}），watchdog 补发判定回退按周一 09:30 口径——请改为标准 5/6 段单值周播表达式`);
+  return { minute: 30, hour: 9, dow: 1, parsed: false };
+}
+
+module.exports = { ...config, parseCron };

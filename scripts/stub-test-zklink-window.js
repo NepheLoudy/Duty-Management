@@ -48,5 +48,18 @@ check('9 小时整', report.fmtDuration(9 * 3600000) === '9小时', report.fmtDu
 check('9小时07分钟', report.fmtDuration(547 * 60000) === '9小时7分钟', report.fmtDuration(547 * 60000));
 check('负值按 0', report.fmtDuration(-5) === '0分钟', report.fmtDuration(-5));
 
+console.log('\n== 6. parseCron（5/6 段兼容与回退，watchdog 补发判定口径） ==');
+const zkConfig = require('../src/zklink/config');
+const p6 = zkConfig.parseCron('0 30 9 * * 1');
+check('6 段默认表达式 → 09:30 周一', p6.parsed === true && p6.minute === 30 && p6.hour === 9 && p6.dow === 1, JSON.stringify(p6));
+const p5 = zkConfig.parseCron('30 9 * * 1');
+check('5 段兼容 → 同口径', p5.parsed === true && p5.minute === 30 && p5.hour === 9 && p5.dow === 1, JSON.stringify(p5));
+const pDaily = zkConfig.parseCron('0 5 * * * *');
+check('每小时形态（小时位*）→ 回退并 warn（parseCron 只服务周播形态）', pDaily.parsed === false && pDaily.hour === 9, JSON.stringify(pDaily));
+const pBad = zkConfig.parseCron('0 30 9 * * 1-5');
+check('列表/步进 → 回退默认且 parsed=false', pBad.parsed === false && pBad.dow === 1 && pBad.hour === 9, JSON.stringify(pBad));
+const pJunk = zkConfig.parseCron('hello');
+check('垃圾输入 → 回退默认', pJunk.parsed === false && pJunk.minute === 30, JSON.stringify(pJunk));
+
 console.log(`\n结果：${pass} 通过 / ${fail} 失败`);
 process.exit(fail === 0 ? 0 : 1);

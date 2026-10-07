@@ -493,3 +493,12 @@
 - 数据源三档定型：feishu（推荐全自动）/ import（ZKLink 网页导出上传兜底）/ http（ZKLink 接口直拉，仅独立账密账号；飞书 SSO 账号走 ZKLINK_ACCESS_TOKEN 静态 token 模式）。
 - `.env` 切 feishu 档；测试新增 stub-test-zklink-feishu-att.js 16 断言（显式名单/通讯录解析+姓名映射/考勤组/三档解析），全仓 14 套全绿。
 - 权限前置（飞书后台人工，报错 99991672 自带一键开通链接）：attendance:rule:readonly + 打卡流水 scope + contact:user.employee_id:readonly；未开权限时周报失败告警卡带指引，开齐后 watchdog 自动补。
+
+### v48c · 2026-10-08 · 随本提交落地 · fix
+
+**打卡周报代码审查修复批（TRAE-code-review 双子代理交叉验证：17 候选→15 成立→全修）**
+
+- 🔴 major 三件：①数据源类失败绕过告警去重（guardedRun 失败先落 lastError 再告警，恢复自动清除）——否则权限缺失等失败会借 watchdog/gateTask 重试链每小时红卡轰炸值日群；②`BATCH_USER_LIMIT` 100→50（官方 user_ids 上限 50，子代理自文档镜像核实，>50 人名单原先必然失败）；③周播 runner 去掉吞错 `.catch(()=>{})`，失败交 gateTask 重试链+管理员补报（与全仓 runner 口径一致；alertedWeekKey 保证不重复告警）。
+- 🟡 minor 十二件：失败分支 delivery 水位补周期门控（历史周补播失败不再污染当前周快照）；feishuAttError hint 改为直接指引报错内 scope/一键链接（原文案引用 .env 不存在的记录）；policy 窗口标注 attGroupId 仅 http 档生效；两处退化断言改真断言（静态 token Authorization 头真验/子部门递归独立返回路径验证）；parseCron 导出+回退 warn+5 断言（5/6 段/每小时回退/列表步进回退/垃圾输入，审查时覆盖缺口补齐）；zklink-data/.zklink-state.json 入 .gitignore（PII 防入库）；test-broadcast 重入返回可读 409；飞书考勤三处 res.json 补容错（非 JSON 响应给可读错误）；alertFailure 未用的 manual 参数删除；README 披露两条已知边界（云文档多批追加非原子/watchdog 只补最近周期）与 preview 无鉴权口径。
+- 误报剔除 4 项（双子代理一致）：user_flows/query 无分页（官方文档核实）、state 并发竞态（同步写盘原子）、周窗口边界（测试覆盖）、端点鉴权与凭据泄漏（fail-closed 齐全）。
+- 全仓 14 套测试全绿（zklink 系 +5 断言，修正一处审查测试自身期望写反：每小时 cron 形态应回退而非解析成功——parseCron 只服务周播形态）。

@@ -51,15 +51,18 @@ function check(name, cond, extra = '') {
   check('employee_type=employee_id 查询参数', flowCall.url.includes('employee_type=employee_id'));
   check('userCount=2', r1.userCount === 2);
 
-  console.log('\n== 2. 无显式名单：通讯录解析 user_id + 姓名映射 ==');
+  console.log('\n== 2. 无显式名单：通讯录解析 user_id + 姓名映射（含子部门递归） ==');
   delete process.env.ZKLINK_ATT_USER_IDS;
   delete require.cache[require.resolve('../src/zklink/config')];
   delete require.cache[require.resolve('../src/zklink/feishuAttendance')];
   const att2 = require('../src/zklink/feishuAttendance');
+  const visitedDepts = new Set();
   global.fetch = async (url, init) => {
     const u = String(url);
     if (u.includes('tenant_access_token')) return { json: async () => ({ code: 0, tenant_access_token: 't-2', expire: 7200 }) };
     if (u.includes('/contact/v3/users')) {
+      const m = u.match(/department_id=([^&]+)/);
+      if (m) visitedDepts.add(decodeURIComponent(m[1]));
       if (u.includes('department_id=0')) {
         return { json: async () => ({ code: 0, data: { items: [
           { user_id: 'u_abc', name: '张三', department_ids: ['od_sub1'] },
@@ -67,7 +70,11 @@ function check(name, cond, extra = '') {
           { name: '无id者', department_ids: [] }, // 缺 user_id 跳过
         ] } }) };
       }
-      if (u.includes('department_id=od_sub1')) return { json: async () => ({ code: 0, data: { items: [] } }) };
+      if (u.includes('department_id=od_sub1')) {
+        return { json: async () => ({ code: 0, data: { items: [
+          { user_id: 'u_sub', name: '王五', department_ids: [] }, // 只在子部门，递归遍历才能拉到
+        ] } }) };
+      }
       return { json: async () => ({ code: 1, msg: `unexpected dept ${u}` }) };
     }
     if (u.includes('user_flows/query')) {
@@ -78,10 +85,9 @@ function check(name, cond, extra = '') {
     return { json: async () => ({ code: 1, msg: `unexpected ${u}` }) };
   };
   const r2 = await att2.fetchFlows(0, 1);
-  check('通讯录解析 2 人（缺 id 跳过）', r2.userCount === 2, String(r2.userCount));
+  check('通讯录解析 3 人（缺 id 跳过 + 子部门递归拉到王五）', r2.userCount === 3, String(r2.userCount));
+  check('子部门 od_sub1 真被遍历', visitedDepts.has('od_sub1'), [...visitedDepts].join(','));
   check('姓名映射：u_abc → 张三', r2.records[0]._name === '张三', r2.records[0]._name);
-  check('子部门遍历触发', calls ? true : false);
-  const subVisited = (() => { let v = false; return v; })();
 
   console.log('\n== 3. listGroups 形态 ==');
   global.fetch = async (url) => {

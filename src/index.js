@@ -311,6 +311,7 @@ app.get('/api/attendance/policy', (req, res) => {
       baseUrl: zklinkConfig.zklinkBaseUrl,
       usernameConfigured: !!zklinkConfig.zklinkUsername,
       attGroupId: zklinkConfig.zklinkAttGroupId || null,
+      attGroupIdApplicable: '仅 http 数据源档生效（feishu 档按通讯录全员拉取，用 ZKLINK_ATT_USER_IDS 收窄）',
       loginPath: zklinkConfig.zklinkLoginPath,
       transactionPath: zklinkConfig.zklinkTransactionPath,
       httpUsable: zklinkClient.isConfigured(),
@@ -391,6 +392,7 @@ app.post('/api/attendance/test-broadcast', requireApiToken, async (req, res) => 
   const { weekOffset = 0, dryRun = false } = req.body || {};
   try {
     const r = await zklinkService.guardedRun({ offset: Number(weekOffset) || 0, dryRun: !!dryRun, trigger: 'manual' });
+    if (r.skipped) return res.status(409).json({ error: `上一轮还在跑（${r.reason}），稍后再试` });
     res.json({ ok: true, sent: r.sent, window: r.window.label, totals: r.totals, filename: r.filename });
   } catch (err) {
     res.status(err.errcode === 'NO_CONFIG' ? 503 : 502).json({ error: err.message, hint: err.hint || null });
