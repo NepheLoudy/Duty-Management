@@ -180,6 +180,15 @@ app.post('/api/bot/test-week-remind', requireApiToken, async (req, res) => {
   }
 });
 
+// 当日中午提醒手动触发（2026-10-07 v46；dryRun 只回预览，非 dryRun 会开启当日监听会话）
+app.post('/api/bot/test-noon-remind', requireApiToken, async (req, res) => {
+  try {
+    res.json({ success: true, result: await inquiry.sendNoonRemind({ dryRun: !!req.body?.dryRun }) });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 app.post('/api/bot/test-ask', requireApiToken, async (req, res) => {
   try {
     res.json({ success: true, result: await inquiry.askToday({ dryRun: !!req.body?.dryRun }) });

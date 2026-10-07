@@ -127,6 +127,59 @@ function sendWeekAheadRemind(options = {}) {
 }
 
 /**
+ * D 日 12:05 中午提醒（2026-10-07 v46 新增）：私信当日值日队员点名+职责。
+ * 动机：当天 18:30 询问前队员无任何私信触达（12:00 看板播报是群卡不是私信），
+ * 午间补一枪并**提前开启监听会话**——下午完工即可打卡/传照片，不必等到 18:30。
+ * 18:30 询问照常重发（已置状态者自动跳过），形成 12:05/18:30/23:00 一天三次触达。
+ * @returns {{date, sent: number, skipped: Array, preview: Array}}
+ */
+async function sendNoonRemind(options = {}) {
+  const dryRun = Boolean(options.dryRun);
+  const date = todayStr();
+  const recs = await dutyTable.getRecordsByDate(date);
+
+  const sent = [];
+  const skipped = [];
+  for (const rec of recs) {
+    if (rec.status) { skipped.push({ name: rec.name, reason: `状态已是「${rec.status}」` }); continue; }
+    const member = roster.findByName(rec.name);
+    if (!member || !member.openId) {
+      skipped.push({ name: rec.name || '（未绑定）', reason: '未绑定账号' });
+      continue;
+    }
+    const text = [
+      `🧹 中午提个醒：今天（${date}）是你的值日日，岗位【${rec.position}】`,
+      `职责：${positionDutyText(rec.position)}`,
+      '',
+      '下午完工后回复「打卡」并上传现场照片（照片会写入值日表对应岗位栏），现在起即可打卡。',
+      '18:30 会再私信确认；24:00（午夜）统一收口，未打卡记「未做完」。想请假回复「我要请假」。',
+    ].join('\n');
+    if (dryRun) {
+      sent.push({ name: member.name, position: rec.position, preview: text });
+    } else {
+      try {
+        await bot.sendTextToUser(member.openId, text);
+        state.mutate((s) => {
+          s.sessions[member.openId] = {
+            date,
+            recordId: rec.recordId,
+            name: member.name,
+            position: rec.position,
+            askedAt: new Date().toISOString(),
+          };
+        });
+        sent.push({ name: member.name, position: rec.position });
+      } catch (err) {
+        skipped.push({ name: member.name, reason: `中午提醒发送失败: ${err.message}` });
+        console.error(`[中午提醒] ${member.name} 发送失败:`, err.message);
+      }
+    }
+  }
+
+  return { date, sent, skipped, preview: sent.map((s) => `${s.name}（${s.position}）`) };
+}
+
+/**
  * D 日 18:30 当日询问：私信当日未完结队员，开启监听会话
  * @returns {{date, asked: number, skipped: Array, preview: Array}}
  */
@@ -554,6 +607,7 @@ module.exports = {
   sendPrevDayRemind,
   sendAheadRemind,
   sendWeekAheadRemind,
+  sendNoonRemind,
   sendLastCall,
   askToday,
   handleYes,

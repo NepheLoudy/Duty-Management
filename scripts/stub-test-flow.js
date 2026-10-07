@@ -481,6 +481,23 @@ function check(desc, cond, detail = '') {
     threeAhead.sent.every((s) => s.preview.includes('三天后') && s.preview.includes('尽早请假')),
     JSON.stringify(threeAhead.sent.map((s) => s.preview)));
 
+  // ---- 11. 当日中午提醒（2026-10-07 v46 新增：18:30 询问前唯一私信触点，提前开启监听会话） ----
+  // 前序用例（打卡/收口/请假）可能已把今日班次置状态，先全部置已请假腾场再造一条干净班次
+  //（本节为末节，此后无用例依赖今日数据）；会话先清空，保证「提前开启」断言干净
+  for (const r of await dutyTable.getRecordsByDate(todayStr())) {
+    if (!r.status) await dutyTable.setStatus(r.recordId, config.status.LEAVE);
+  }
+  await dutyTable.createDayRecords(todayStr(), [{ member: roster.findByName('队员C'), position: '装配区' }]);
+  state.mutate((s) => { s.sessions = {}; });
+  const noon = await inquiry.sendNoonRemind();
+  check('中午提醒：恰好命中新建班次且私信发出',
+    noon.date === todayStr() && noon.sent.length === 1 && noon.sent[0].name === '队员C'
+      && memory.dmCalls.some((c) => c.openId === 'ou_test_c' && c.text.includes('中午提个醒')),
+    JSON.stringify({ sent: noon.sent, skipped: noon.skipped }));
+  check('中午提醒：监听会话已提前开启（不等 18:30）',
+    !!(state.load().sessions['ou_test_c'] || {}).recordId,
+    JSON.stringify(state.load().sessions['ou_test_c'] || {}));
+
   console.log(failed === 0 ? `\n全部通过 ✅（临时目录 ${TMP}）` : `\n${failed} 项失败 ❌`);
   process.exit(failed === 0 ? 0 : 1);
 })().catch((err) => {

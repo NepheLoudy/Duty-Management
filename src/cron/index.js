@@ -13,6 +13,8 @@ const express = require('../services/expressService');
 //   1.5 提前预告  DUTY_AHEAD_REMIND_SCHEDULES (默认 0 5 10/15/20 * * *,
 //                 D-7 与 D-3 每天各 3 次私信点名，2026-10-07 起替代原 D-7 单槽位 20:05)
 //   2. 当日询问   DUTY_ASK_SCHEDULE          (0 30 18 * * *, D 日 18:30 私信询问，开启监听窗口)
+//   2.5 中午提醒  DUTY_NOON_REMIND_SCHEDULE   (0 5 12 * * *,  D 日 12:05 私信点名+职责，
+//                 提前开启监听会话（下午即可打卡），v46 新增)
 //   3. 收口       DUTY_DEADLINE_SCHEDULE     (0 0 0 * * *,   D 日 24:00（午夜）：置未做完/算总状态/生成补偿；
 //                                                 0 点已跨日，归属日期由 deadline runner 显式指定为 D 日)
 //   3.5 临门提醒  DUTY_LASTCALL_SCHEDULE      (0 0 23 * * *,  D 日 23:00 私信未完结队员，收口前最后触达)
@@ -20,7 +22,7 @@ const express = require('../services/expressService');
 //   5. 看板播报   DUTY_BOARD_BROADCAST_SCHEDULE (0 0 12 * * *, 每日 12:00 webhook 推今日值日看板)
 //
 // 晚间静默（02:00–09:00，Asia/Shanghai，可配）：
-//   - 提前预告/次日提醒/当日询问/对账/看板播报为可重扫任务 → gateTask，窗口内登记积压，
+//   - 中午提醒/提前预告/次日提醒/当日询问/对账/看板播报为可重扫任务 → gateTask，窗口内登记积压，
 //     冲刷时重跑整个任务函数（以补发时刻最新数据重查）；
 //     提前预告同一域（同 daysAhead）挂多个 cron 槽位，积压按任务名合并只留最新槽位——
 //     各槽位内容一致，合并冲刷无损失；
@@ -49,6 +51,7 @@ function startCronJobs() {
   // 静默积压冲刷执行器：与 cron 回调共用同一执行链（重跑整个任务函数）
   const quietTaskRunners = {
     duty_prev_remind: () => inquiry.sendPrevDayRemind(),
+    duty_noon_remind: () => inquiry.sendNoonRemind(),
     duty_ask: () => inquiry.askToday(),
     duty_lastcall: () => inquiry.sendLastCall(),
     duty_reconcile: () => compensation.reconcile(),
@@ -68,6 +71,8 @@ function startCronJobs() {
     }
   }
   tasks.push(scheduleTask(config.schedule.ask, 'duty_ask', '当日值日询问', quietTaskRunners.duty_ask));
+  // D 日中午提醒（2026-10-07 v46）：18:30 询问前唯一的私信触点，提前开启监听会话
+  tasks.push(scheduleTask(config.schedule.noonRemind, 'duty_noon_remind', '当日中午提醒', quietTaskRunners.duty_noon_remind));
   tasks.push(scheduleTask(config.schedule.lastCall, 'duty_lastcall', '收口前临门提醒', quietTaskRunners.duty_lastcall));
   tasks.push(scheduleTask(config.schedule.reconcile, 'duty_reconcile', '值日对账', quietTaskRunners.duty_reconcile));
   tasks.push(scheduleTask(config.schedule.boardBroadcast, 'duty_board_broadcast', '看板自动播报', quietTaskRunners.duty_board_broadcast));
@@ -122,7 +127,7 @@ async function runClose(options = {}) {
   return result;
 }
 
-/** cron 状态（管理接口用）。任务数：6 常规 + 提前预告域数×槽位数（默认 2×3=6）+ 1 收口（默认共 13，判 ≥6 容忍未来增减） */
+/** cron 状态（管理接口用）。任务数：7 常规 + 提前预告域数×槽位数（默认 2×3=6）+ 1 收口（默认共 14，判 ≥6 容忍未来增减） */
 function getCronStatus() {
   return {
     running: tasks.length >= 6,

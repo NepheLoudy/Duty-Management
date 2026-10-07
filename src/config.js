@@ -91,6 +91,9 @@ module.exports = {
         .split(';').map((s) => s.trim()).filter(Boolean),
     },
     ask: process.env.DUTY_ASK_SCHEDULE || '0 30 18 * * *',
+    // 当日中午提醒（2026-10-07 v46 新增）：D 日 12:05 私信当日队员点名+职责，
+    // 并提前开启监听会话（下午完工即可打卡）；12:05 与 12:00 看板播报错峰
+    noonRemind: process.env.DUTY_NOON_REMIND_SCHEDULE || '0 5 12 * * *',
     // 收口前 1 小时临门提醒（2026-09-16 新增；2026-09-17 随收口推迟到 23:00）
     lastCall: process.env.DUTY_LASTCALL_SCHEDULE || '0 0 23 * * *',
     // 24:00（午夜）收口（2026-09-17 用户口径：大家下班晚，原 22:00 提前）。

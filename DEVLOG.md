@@ -452,3 +452,12 @@
 - 定时任务数 8 → 13（6 常规 + 提前预告 2 域×3 槽位 + 收口），cron-status 的 running 阈值 ≥6 不变；
 - 文档同步：.env.example / README（定时任务表、API 表、配置段）/ AGENTS.md 私信链行；
 - 测试：flow 桩第 10 节扩为 D-7/D-3 双断言（daysAhead 透传、「三天后」文案、临期提示）；七套 stub 全绿（exit 0）。
+
+## v46 · 2026-10-07 · 随本提交落地 · feat
+
+**当日中午提醒补位：D 日 12:05 私信点名 + 提前开启监听会话（曼波新需求）**
+
+- 需求口径：当天中午也要提醒——此前 D 日 18:30 询问前队员无任何私信触达（12:00 看板播报是群卡非私信），午间补一枪：点名+岗位职责+打卡/请假引导，并**提前开启监听会话**，下午完工即可打卡/传照片，不必等到 18:30；与 12:00 看板播报错峰取 12:05；
+- 实现：`inquiryService.sendNoonRemind`（已置状态跳过、未绑定跳过、逐人异常隔离，与 18:30 询问同款守卫；18:30 询问照常重发，形成 12:05/18:30/23:00 当天三次触达）；`config.schedule.noonRemind`（`DUTY_NOON_REMIND_SCHEDULE` 默认 `0 5 12 * * *`）；cron 注册 `duty_noon_remind`（可重扫任务过静默闸门）；`POST /api/bot/test-noon-remind` 手动触发（dryRun 预览，非 dryRun 开启当日会话）；
+- 定时任务数 13 → 14；文档同步：.env.example / README（定时任务表、API 表、配置段）/ AGENTS.md 私信链行；
+- 测试：flow 桩新增第 11 节（中午点名命中、监听会话提前开启断言）；七套 stub 全绿（exit 0）。
