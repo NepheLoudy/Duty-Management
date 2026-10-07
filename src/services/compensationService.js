@@ -15,8 +15,10 @@ const { withScheduleLock } = require('./scheduleService');
 //   · 下周未生成 → 义务进 .duty-state.json 排队，生成排班表时优先安置
 //   · 下周已生成但该队员当周天天有班（小队多条补偿同周）→ 顺延到再下一周
 //     （weekStart+7、deferCount 计数，对账报告可见；不再静默留队到过期）
-// - 加罚（2026-09-24 收紧口径）：同一人连续两次「未做完」→ 多加 1 次（该缺勤周期共 3 次）；
-//   主动请假不计入连续缺勤（合规安排不同罪，防止请假→加罚→班更多→更易被抽调的雪球）
+// - 加罚（2026-10-07 v47 口径，曼波定）：同一人连续两次「未做完」或「已请假」→ 多加 1 次
+//   （该缺勤周期共 3 次）；请假与未做完共用同一条连续计数，完成 1 次值日即清零。
+//   （2026-09-24 曾把主动请假豁免出计数，2026-10-07 按曼波要求恢复计入——
+//   连续两次请假说明时间安排持续冲突，下轮多插一次既补总量也作提示）
 // - 00:30 对账：核对下周插入义务是否全部安置，未安置补插或顺延
 // ============================================================
 
@@ -26,9 +28,9 @@ function newId() {
 
 /**
  * 登记一次缺勤：生成下周插入义务。
- * 加罚只计「未做完」（2026-09-24）：主动请假属合规安排（可提前查班、请假当日由同日
- * 队员兼顾、补偿总量守恒），不计入连续缺勤——否则一次请假翻倍成两次补偿，惩罚滚雪球
- * （叠加补位抽调后会反复选中同一人）。连续两次「未做完」仍触发加罚（+1）后计数清零。
+ * 加罚（2026-10-07 v47 口径，曼波定）：请假与未做完共用同一条连续计数——连续两次
+ * 「已请假」或「未做完」（含混合）触发加罚 +1 条义务，计数清零；完成 1 次值日即清零
+ * （resetStreak）。每次缺勤本身仍各登记 1 条补偿（总量守恒不变），加罚是额外代价。
  * @param {string} memberName
  * @param {string} dutyDateStr 缺勤那次值日的日期（义务插到其所在自然周的下一周）
  * @param {string} reason 已请假 / 未做完
@@ -47,7 +49,7 @@ function handleAbsence(memberName, dutyDateStr, reason) {
       createdAt: new Date().toISOString(),
     }];
     let penalty = false;
-    if (reason === config.status.MISS) {
+    if (reason === config.status.MISS || reason === config.status.LEAVE) {
       const streak = s.absenceStreaks[memberName] || { count: 0, lastDate: '' };
       streak.count += 1;
       streak.lastDate = dutyDateStr;
@@ -57,7 +59,7 @@ function handleAbsence(memberName, dutyDateStr, reason) {
           name: memberName,
           dutyDate: dutyDateStr,
           weekStart,
-          reason: `${reason}（连续两次缺勤加罚）`,
+          reason: `${reason}（连续两次加罚）`,
           placed: false,
           createdAt: new Date().toISOString(),
         });
@@ -165,7 +167,15 @@ async function placePendingLocked(options = {}) {
   // 周级插入容量（2026-09-25）：非请假位插入每周最多 weeklyInsertionAllowance 条，
   // 超出顺延下一周——防止欠账集中安置把一周插成天天 4 人。填请假位不占容量。
   const allowance = Number(config.generate?.weeklyInsertionAllowance) || 2;
-  const weeklyInserted = new Map(); // weekStart -> 已用非请假位插入数
+  // 持久计数（2026-10-07 v47 修复）：初值取义务账目里各周已安置的非回填义务数——
+  // 此前每次运行从 0 起算，闸门只限单次运行（每晚对账各插 2 条，一周能累积 14 条
+  // 非回填插入，10 月上旬天天 4-5 人即此因）；placedFillLeave 未标记的历史账目按非回填保守计。
+  const weeklyInserted = new Map(); // weekStart -> 已用非请假位插入数（账目初值 + 本次运行即时累加）
+  for (const o of s.obligations || []) {
+    if (!o.placed || o.placedFillLeave === true || !o.placedDate) continue;
+    const ws = mondayOf(o.placedDate);
+    weeklyInserted.set(ws, (weeklyInserted.get(ws) || 0) + 1);
+  }
 
   const placedIds = [];
   for (const o of active) {

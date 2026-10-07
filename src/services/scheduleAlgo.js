@@ -153,10 +153,12 @@ function planInsertion({ weekStartStr, rangeStart, rangeEnd, memberName, assignm
  * @param {Array<{name: string, weekStartStr: string}>} p.insertions 需优先安置的补偿插入（每条=1次）
  * @param {number} p.minIntervalDays 同一人两次值日最小间隔（软约束）
  * @param {number} [p.weeklyAllowance] 每周非请假位插入容量（默认 2，超出留队）
+ * @param {Object<string,number>} [p.weeklyUsed] 各目标周已用非回填插入数（调用方从义务账目
+ *   统计，2026-10-07 v47 起必传口径：闸门跨运行持久生效，仅本次运行内自计数不够）
  * @param {string} p.seedStr 随机种子（同参数可复现）
- * @returns {{days: Array<{date: string, items: Array<{name: string, position: string, isInsertion: boolean}>}>, unplacedInsertions: Array, quotaReport: Array}}
+ * @returns {{days: Array<{date: string, items: Array<{name: string, position: string, isInsertion: boolean, fillLeave?: boolean}>}>, unplacedInsertions: Array, quotaReport: Array}}
  */
-function generateSchedule({ members, startDateStr, days, history = [], insertions = [], preassigned = [], minIntervalDays = 2, weeklyAllowance, seedStr = 'duty' }) {
+function generateSchedule({ members, startDateStr, days, history = [], insertions = [], preassigned = [], minIntervalDays = 2, weeklyAllowance, weeklyUsed, seedStr = 'duty' }) {
   const rng = mulberry32(hashSeed(seedStr));
   const assignments = new Map(); // dateStr -> [{name, position, isInsertion}]
   const unplacedInsertions = [];
@@ -197,7 +199,8 @@ function generateSchedule({ members, startDateStr, days, history = [], insertion
   // 插进生成范围头部把一周插成天天 4 人。普通生成 assignments 无 status → 无请假位；
   // 重排场景（preassigned 预置）保留的已请假记录会被识别为请假空缺位（fillLeave 不占容量）。
   const allowance = weeklyAllowance == null ? 2 : weeklyAllowance;
-  const weeklyInserted = new Map(); // weekStart -> 已用非请假位插入数
+  // 周容量初值 = 义务账目统计的各周已用数（v47：跨运行持久）；本次运行内安置再即时累加
+  const weeklyInserted = new Map(Object.entries(weeklyUsed || {}).map(([ws, n]) => [ws, Number(n) || 0]));
   for (const ins of insertions) {
     if (!quotas.has(ins.name)) {
       // 不在值日队列（如白名单成员）：补偿义务不豁免，进未安置队列留
@@ -221,7 +224,7 @@ function generateSchedule({ members, startDateStr, days, history = [], insertion
       continue;
     }
     if (!plan.fillLeave) weeklyInserted.set(ins.weekStartStr, (weeklyInserted.get(ins.weekStartStr) || 0) + 1);
-    getItems(plan.dateStr).push({ name: ins.name, position: plan.position, isInsertion: true });
+    getItems(plan.dateStr).push({ name: ins.name, position: plan.position, isInsertion: true, fillLeave: plan.fillLeave });
     lastDuty.set(ins.name, plan.dateStr); // 插入也是一次值日，影响间隔约束
   }
 

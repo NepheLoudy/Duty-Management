@@ -323,9 +323,10 @@ function check(desc, cond, detail = '') {
       recon.report);
   }
 
-  // ---- 7.5 加罚口径 + 补位密度（2026-09-24，置于对账后避免新义务被安置干扰 brief 断言） ----
+  // ---- 7.5 加罚口径 + 补位密度（2026-10-07 v47 口径，置于对账后避免新义务被安置干扰 brief 断言） ----
   {
-    // 加罚只计「未做完」：连续两次未做完触发加罚（义务翻倍），请假不计数
+    // 加罚口径（2026-10-07 v47，曼波定）：请假与未做完共用连续计数——
+    // 连续两次任一原因（含混合）触发加罚 +1 条义务，计数清零
     const obBefore = state.load().obligations.length;
     const a1 = compensation.handleAbsence('队员A', addDays(today, -2), '未做完');
     check('加罚口径：未做完第1次不加罚', a1.created.length === 1 && !a1.penalty && a1.streak === 1, JSON.stringify(a1));
@@ -334,17 +335,18 @@ function check(desc, cond, detail = '') {
       a2.created.length === 2 && a2.penalty && a2.created.some((c) => c.reason.includes('加罚')),
       JSON.stringify(a2.created.map((c) => c.reason)));
     check('加罚口径：连续未做完义务共 3 条（2+加罚1）', state.load().obligations.length === obBefore + 3);
-    // 请假不计数：连续请假两次不加罚、streak 原值不动（B 此前收口场景可能已有计数）
-    const bStreakBefore = (state.load().absenceStreaks['队员B'] || { count: 0 }).count;
+    // 连续请假两次：同样触发加罚（2026-10-07 恢复计入，废除 09-24 的请假豁免）
+    state.mutate((s) => { s.absenceStreaks['队员B'] = { count: 0, lastDate: '' }; });
     const b1 = compensation.handleAbsence('队员B', addDays(today, -2), '已请假');
     const b2 = compensation.handleAbsence('队员B', addDays(today, -1), '已请假');
-    check('加罚口径：连续请假两次各只1条义务、不加罚',
-      b1.created.length === 1 && b2.created.length === 1 && !b2.penalty,
+    check('加罚口径：连续请假第二次触发加罚（义务2条+带标记）',
+      b1.created.length === 1 && !b1.penalty && b1.streak === 1
+        && b2.created.length === 2 && b2.penalty && b2.created.some((c) => c.reason.includes('加罚')),
       JSON.stringify({ b1: b1.created.length, b2: b2.created.length, penalty: b2.penalty }));
-    check('加罚口径：请假不改变 streak（不计入）',
-      (state.load().absenceStreaks['队员B'] || { count: 0 }).count === bStreakBefore);
+    check('加罚口径：连续请假义务共 3 条（2+加罚1）', state.load().obligations.length === obBefore + 6);
+    check('加罚口径：加罚后 streak 清零', (state.load().absenceStreaks['队员B'] || { count: -1 }).count === 0);
     const m2 = compensation.handleAbsence('队员X', addDays(today, -1), '未做完');
-    check('加罚口径：请假后首次未做完只算第1次', m2.created.length === 1 && !m2.penalty && m2.streak === 1, JSON.stringify(m2));
+    check('加罚口径：首次未做完只算第1次', m2.created.length === 1 && !m2.penalty && m2.streak === 1, JSON.stringify(m2));
 
     // 请假空缺位优先（2026-09-25 检修）：planInsertion 对带 status 的快照优先填已请假空缺岗
     {
@@ -419,6 +421,37 @@ function check(desc, cond, detail = '') {
         }),
         JSON.stringify({ overThree: overThree.map(([d, rs]) => `${d}:${rs.length}`), byWeek: [...overByWeek.entries()], keptLeaveDates }));
     }
+  }
+
+  // ---- 7.7 周容量持久计数（placePending 侧，2026-10-07 v47） ----
+  // 修复前 weeklyInserted 每次运行从 0 起算，每晚对账各插 2 条、一周累积 14 条非回填
+  // 插入（10 月上旬天天 4-5 人的根因）；现在初值取义务账目各周已安置的非回填数，
+  // 闸门跨运行生效——目标周账目已满 2 条时，新义务顺延（weekly_allowance）不再插。
+  {
+    // 目标周取 +21 起的周：远离前文保留的已请假记录（+1/+2 附近），保证无非回填可用的
+    // 请假空缺位（fillLeave 会绕过容量闸门）；种子条数取当前生效的周额度 K（本测 K=10）
+    const K = Number(config.generate.weeklyInsertionAllowance) || 2;
+    const capWeekStart = mondayOf(addDays(today, 21));
+    const mk = (id, name) => ({
+      id, name, dutyDate: addDays(today, -1), weekStart: capWeekStart,
+      reason: '已请假', placed: false, createdAt: new Date().toISOString(),
+    });
+    state.mutate((s) => {
+      for (let i = 0; i < K; i++) {
+        s.obligations.push({
+          ...mk(`ob_cap_seed_${i}`, i % 2 ? '队员A' : '队员B'),
+          placed: true, placedDate: addDays(capWeekStart, (i % 6) + 1), placedFillLeave: false,
+        });
+      }
+      s.obligations.push(mk('ob_cap_new', '队员C'));
+    });
+    const capRun = await compensation.placePending({});
+    const mine = capRun.deferred.find((d) => d.id === 'ob_cap_new');
+    check('周容量持久计数：账目已满 K 条时新义务顺延（weekly_allowance）',
+      !!mine && mine.deferReason === 'weekly_allowance' && !capRun.placed.some((p) => p.id === 'ob_cap_new'),
+      JSON.stringify({ deferred: capRun.deferred.map((d) => ({ id: d.id, reason: d.deferReason })), placed: capRun.placed.map((p) => p.id) }));
+    // 清理测试账目（种子与新义务都不留给后续用例）
+    state.mutate((s) => { s.obligations = s.obligations.filter((o) => !String(o.id).startsWith('ob_cap_')); });
   }
 
   // ---- 8. 值日助手指令 ----

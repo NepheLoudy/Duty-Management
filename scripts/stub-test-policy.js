@@ -111,6 +111,80 @@ function check(desc, cond, detail = '') {
     JSON.stringify(backlogItems));
   fs.rmSync(process.env.QUIET_BACKLOG_FILE, { force: true });
 
+  // ③.6 失败自动重试与补报（2026-10-07 v47，10-05 断网静默丢提醒事故的回归）：
+  // 非静默直跑失败 → 登记积压按递增间隔重试；重试耗尽 → 转失败账目；
+  // notifier 补报成功 → 清账。fresh-require 加载（QUIET_HOURS_DISABLED=1 + 毫秒级重试参数）
+  {
+    process.env.QUIET_HOURS_DISABLED = '1'; // 直跑路径需要非静默
+    process.env.QUIET_RETRY_MAX_ATTEMPTS = '3';
+    process.env.QUIET_RETRY_BASE_MS = '10';
+    delete require.cache[require.resolve('../src/utils/quietHours')];
+    const qh2 = require('../src/utils/quietHours');
+    check('重试环境：静默已关闭（直跑路径生效）', qh2.inQuietHours() === false);
+
+    qh2.registerTask('test_gate_fail', async () => {});
+    let threw = false;
+    try {
+      await qh2.gateTask('test_gate_fail', 'k1', async () => { throw new Error('模拟网络抖动'); }, '重试直跑');
+    } catch (err) {
+      threw = true;
+    }
+    const afterGateFail = JSON.parse(fs.readFileSync(process.env.QUIET_BACKLOG_FILE, 'utf-8')).items;
+    check('gateTask 执行失败：错误照抛 + 积压登记待重试',
+      threw && afterGateFail.some((it) => it.name === 'test_gate_fail' && it.lastError === '模拟网络抖动'),
+      JSON.stringify(afterGateFail));
+    await new Promise((r) => setTimeout(r, 80)); // 10ms 重试定时器自动跑成功 runner → 清积压
+    check('gateTask 执行失败：重试成功后积压清空',
+      !fs.existsSync(process.env.QUIET_BACKLOG_FILE)
+        || JSON.parse(fs.readFileSync(process.env.QUIET_BACKLOG_FILE, 'utf-8')).items.length === 0);
+
+    // 重试中间成功：attempts=1 的任务第一次冲刷失败、按退避间隔重跑成功
+    let flakyRuns = 0;
+    qh2.registerTask('test_flaky_task', async () => {
+      flakyRuns += 1;
+      if (flakyRuns === 1) throw new Error('第一次失败');
+    });
+    fs.writeFileSync(process.env.QUIET_BACKLOG_FILE, JSON.stringify({
+      items: [{ type: 'task', name: 'test_flaky_task', fireKey: 'f1', attempts: 1 }],
+      failures: [],
+    }));
+    await qh2.runFlush();
+    await new Promise((r) => setTimeout(r, 80));
+    check('自动重试：失败后按退避间隔重跑成功、积压清空',
+      flakyRuns >= 2
+        && (!fs.existsSync(process.env.QUIET_BACKLOG_FILE)
+          || JSON.parse(fs.readFileSync(process.env.QUIET_BACKLOG_FILE, 'utf-8')).items.length === 0),
+      JSON.stringify({ flakyRuns }));
+
+    // 重试耗尽：转失败账目（不静默丢弃）
+    qh2.registerTask('test_dead_task', async () => { throw new Error('持续断网'); });
+    fs.writeFileSync(process.env.QUIET_BACKLOG_FILE, JSON.stringify({
+      items: [{ type: 'task', name: 'test_dead_task', fireKey: 'd1', attempts: 2 }],
+      failures: [],
+    }));
+    await qh2.runFlush();
+    const exhausted = JSON.parse(fs.readFileSync(process.env.QUIET_BACKLOG_FILE, 'utf-8'));
+    check('重试耗尽：转入失败账目（items 清空、failures 有记录）',
+      exhausted.items.length === 0 && exhausted.failures.length === 1
+        && exhausted.failures[0].name === 'test_dead_task' && exhausted.failures[0].attempts === 3,
+      JSON.stringify(exhausted));
+    const reported = [];
+    qh2.registerFailureNotifier(async (failures) => { reported.push(...failures); });
+    await qh2.maybeReportFailures();
+    const afterReport = fs.existsSync(process.env.QUIET_BACKLOG_FILE)
+      ? JSON.parse(fs.readFileSync(process.env.QUIET_BACKLOG_FILE, 'utf-8'))
+      : { items: [], failures: [] };
+    check('失败补报：notifier 收到账目且补报成功后清账',
+      reported.length === 1 && reported[0].name === 'test_dead_task'
+        && (afterReport.failures || []).length === 0,
+      JSON.stringify({ reported, afterReport }));
+
+    delete process.env.QUIET_HOURS_DISABLED;
+    delete process.env.QUIET_RETRY_MAX_ATTEMPTS;
+    delete process.env.QUIET_RETRY_BASE_MS;
+    fs.rmSync(process.env.QUIET_BACKLOG_FILE, { force: true });
+  }
+
   const managed = await assistant.handleCommand({ command: '值日助手', chatType: 'group', chatId: 'oc_managed_a' });
   check('管辖群请求看板 → 正常出卡（限流内首发）',
     managed.handled === true && cardsSent.includes('oc_managed_a'), JSON.stringify({ managed, cardsSent }));

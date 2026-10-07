@@ -1,5 +1,5 @@
 const config = require('../config');
-const { addDays, diffDays, monthAdd, todayStr } = require('../utils/dates');
+const { addDays, diffDays, monthAdd, mondayOf, todayStr } = require('../utils/dates');
 const algo = require('./scheduleAlgo');
 const dutyTable = require('./dutyTableService');
 const roster = require('./rosterService');
@@ -76,6 +76,17 @@ async function generateLocked(options = {}) {
 
   const stateData = state.load();
   const insertions = collectPendingInsertions(stateData, startDate, endDate);
+  // 周插入容量持久计数（2026-10-07 v47 修复）：以义务账目为准——此前 weeklyInserted
+  // 每次生成从 0 起算，闸门只限单次运行（每晚对账/每轮生成各插 2 条，一周能累积
+  // 14 条非回填插入，10 月上旬天天 4-5 人即此因）。先数账目里各周已安置的非回填
+  // 义务（placedDate 落在该周；placedFillLeave 未标记的历史账目按非回填保守计），
+  // 闸门才真正跨运行生效。
+  const weeklyUsed = {};
+  for (const o of stateData.obligations || []) {
+    if (!o.placed || o.placedFillLeave === true || !o.placedDate) continue;
+    const ws = mondayOf(o.placedDate);
+    weeklyUsed[ws] = (weeklyUsed[ws] || 0) + 1;
+  }
 
   // 生成前刷新通讯录名册（失败沿用本地名册，不阻断生成）
   try {
@@ -97,6 +108,7 @@ async function generateLocked(options = {}) {
     insertions,
     minIntervalDays: config.generate.minIntervalDays,
     weeklyAllowance: options.weeklyAllowance != null ? options.weeklyAllowance : config.generate.weeklyInsertionAllowance,
+    weeklyUsed,
     seedStr: `duty|${startDate}|${members.map((m) => m.name).join(',')}|${history.length}`,
   });
 
@@ -111,14 +123,16 @@ async function generateLocked(options = {}) {
         pendingByMember.get(ins.name).push(ins.id);
       }
     }
-    const markPlaced = (ids, dateStr) => {
-      if (ids.length === 0) return;
+    const markPlaced = (entries, dateStr) => {
+      if (entries.length === 0) return;
       state.mutate((s) => {
         for (const o of s.obligations) {
-          if (ids.includes(o.id)) {
+          const hit = entries.find((e) => e.id === o.id);
+          if (hit) {
             o.placed = true;
             o.placedAt = new Date().toISOString();
             o.placedDate = dateStr; // 与 placePending 同款：rebalance 义务重置按 placed && placedDate 判定，缺 placedDate 会让生成安置的义务重排后不被重置
+            o.placedFillLeave = !!hit.fillLeave; // 回填标记随账落账——周容量持久计数按此豁免回填（v47）
             o.via = 'generate';
           }
         }
@@ -131,6 +145,7 @@ async function generateLocked(options = {}) {
           member: roster.findByName(it.name) || { name: it.name },
           position: it.position,
           insertionName: it.isInsertion ? it.name : '',
+          fillLeave: !!it.fillLeave,
         }))
         .filter((it) => Boolean(it.member));
       if (items.length === 0) continue; // 该日只剩保留记录，无新班次可写
@@ -140,7 +155,7 @@ async function generateLocked(options = {}) {
       for (const it of items) {
         if (!it.insertionName) continue;
         const q = pendingByMember.get(it.insertionName);
-        if (q && q.length > 0) dayPlaced.push(q.shift());
+        if (q && q.length > 0) dayPlaced.push({ id: q.shift(), fillLeave: it.fillLeave });
       }
       markPlaced(dayPlaced, day.date);
     }

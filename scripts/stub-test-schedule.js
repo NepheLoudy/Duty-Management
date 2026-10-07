@@ -141,6 +141,45 @@ function flatten(result) {
   check('用例3 队员A 两次插入岗位分散', aIns.length === 2 && aIns[0] !== aIns[1], JSON.stringify(aIns));
 }
 
+// ---------- 用例 3.5：周容量持久计数（2026-10-07 v47，账目初值跨运行生效） ----------
+{
+  const members = fixtureMembers(8);
+  const start = '2026-10-05'; // 周一
+
+  // 账目已满（2/2）：新的非回填插入整周留队——修复前每次运行从 0 起算会照插不误
+  const r1 = algo.generateSchedule({
+    members, startDateStr: start, days: 28, history: [],
+    insertions: [{ name: '队员A', weekStartStr: start }, { name: '队员A', weekStartStr: start }],
+    weeklyUsed: { [start]: 2 }, seedStr: 't35a',
+  });
+  check('用例3.5 账目已满周：非回填插入整周留队',
+    r1.unplacedInsertions.length === 2 && !flatten(r1).shifts.some((s) => s.isInsertion),
+    JSON.stringify({ unplaced: r1.unplacedInsertions.length }));
+
+  // 账目半满（1/2）：只再安置 1 条，第 2 条留队
+  const r2 = algo.generateSchedule({
+    members, startDateStr: start, days: 28, history: [],
+    insertions: [{ name: '队员A', weekStartStr: start }, { name: '队员A', weekStartStr: start }],
+    weeklyUsed: { [start]: 1 }, seedStr: 't35b',
+  });
+  check('用例3.5 账目半满周：只再安置 1 条、其余留队',
+    r2.unplacedInsertions.length === 1 && flatten(r2).shifts.filter((s) => s.isInsertion).length === 1,
+    JSON.stringify({ unplaced: r2.unplacedInsertions.length }));
+
+  // 回填豁免：整周额度用尽也不影响请假空缺位回填（fillLeave 不占容量）
+  const leaveDate = addDays(start, 1);
+  const r3 = algo.generateSchedule({
+    members, startDateStr: start, days: 7, history: [],
+    preassigned: [{ name: '队员B', position: '总负责', date: leaveDate, status: '已请假' }],
+    insertions: [{ name: '队员C', weekStartStr: start }],
+    weeklyUsed: { [start]: 2 }, seedStr: 't35c',
+  });
+  const cIns = flatten(r3).shifts.filter((s) => s.name === '队员C' && s.isInsertion);
+  check('用例3.5 回填豁免：额度用尽仍回填请假空缺位',
+    cIns.length === 1 && cIns[0].date === leaveDate && cIns[0].position === '总负责' && cIns[0].fillLeave === true,
+    JSON.stringify(cIns));
+}
+
 // ---------- 用例 4：插入日避开本人已有班次 ----------
 {
   const members = fixtureMembers(4);

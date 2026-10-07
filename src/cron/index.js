@@ -6,6 +6,8 @@ const inquiry = require('../services/inquiryService');
 const compensation = require('../services/compensationService');
 const assistant = require('../services/assistantService');
 const express = require('../services/expressService');
+const roster = require('../services/rosterService');
+const bot = require('../feishu/bot');
 
 // ============================================================
 // 定时任务（node-cron 6 段式 + Asia/Shanghai）：
@@ -101,6 +103,31 @@ function startCronJobs() {
     quietHours.registerTask(name, fn);
   }
   quietHours.registerPayloadHandler('duty_close_notify', (payload) => inquiry.sendCloseNotifications(payload));
+  // 失败补报器（2026-10-07 v47）：定时任务自动重试耗尽后，由这里私信管理员——
+  // 断网期间补报自身发不出去，账目保留到网络恢复后的首个成功时机
+  quietHours.registerFailureNotifier(async (failures) => {
+    const lines = ['⚠️ 定时任务失败补报（已自动重试仍未成功，当前网络已恢复）：'];
+    for (const f of failures) {
+      lines.push(`- ${f.name} ×${f.attempts} 次：${f.lastError}（${f.failedAt}）`);
+    }
+    lines.push('以上时段的任务可能未触达队员，建议在「值日助手」里核对当天名单，必要时手动补提醒。');
+    const text = lines.join('\n');
+    const admins = roster.getAdminOpenIds();
+    if (admins.length === 0) {
+      console.warn('[任务补报] 未配置管理员（DUTY_ADMIN_OPEN_IDS/名册 admin），失败账目仅保留在积压文件与 cron-status');
+      return;
+    }
+    let sent = 0;
+    for (const openId of admins) {
+      try {
+        await bot.sendTextToUser(openId, text);
+        sent += 1;
+      } catch (err) {
+        console.error('[任务补报] 管理员私信发送失败:', err.message);
+      }
+    }
+    if (sent === 0) throw new Error('管理员补报私信全部发送失败');
+  });
   quietHours.initQuietHoursFlush();
 
   return tasks;
