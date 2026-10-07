@@ -306,6 +306,7 @@ app.get('/api/attendance/policy', (req, res) => {
       quietHours: quietHoursZk.getStatus(),
     },
     dataSource: zklinkConfig.dataSource,
+    dataSourceDocs: 'feishu=飞书考勤 API 全自动（推荐，需 attendance+contact employee_id 权限）；import=ZKLink 网页端导出上传；http=ZKLink 接口直拉（仅独立账密账号）',
     zklink: {
       baseUrl: zklinkConfig.zklinkBaseUrl,
       usernameConfigured: !!zklinkConfig.zklinkUsername,

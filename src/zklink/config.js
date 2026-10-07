@@ -19,9 +19,16 @@ const DATA_DIR = process.env.ZKLINK_DATA_DIR || path.join(ROOT, 'zklink-data');
 
 const config = {
   enabled: process.env.ZKLINK_DISABLED !== '1',
-  dataSource: (process.env.ZKLINK_DATA_SOURCE || 'import') === 'http' ? 'http' : 'import',
+  // 数据源三档（2026-10-07 定案：曼波确认数据在飞书考勤 → feishu 为推荐档；
+  // import=ZKLink 网页端导出上传兜底；http=ZKLink 接口直拉，仅独立账密账号可用）
+  dataSource: ['feishu', 'http'].includes(process.env.ZKLINK_DATA_SOURCE)
+    ? process.env.ZKLINK_DATA_SOURCE
+    : 'import',
   timezone: 'Asia/Shanghai',
   cron: process.env.ZKLINK_BROADCAST_CRON || '0 30 9 * * 1', // 周一 09:30 上海，播上一周
+
+  // 飞书考勤档：打卡人员 user_id 显式名单（逗号分隔，可空=通讯录全员 user_id）
+  attUserIds: process.env.ZKLINK_ATT_USER_IDS || '',
 
   zklinkBaseUrl: (process.env.ZKLINK_BASE_URL || 'https://zklink.zktecoiot.com').replace(/\/+$/, ''),
   zklinkUsername: process.env.ZKLINK_USERNAME || '',

@@ -18,6 +18,7 @@ const config = require('./config');
 const report = require('./report');
 const store = require('./store');
 const zklinkClient = require('./zklinkClient');
+const feishuAttendance = require('./feishuAttendance');
 const { sendCardToWebhook } = require('../feishu/webhook');
 const feishuDoc = require('./feishuDoc');
 const card = require('./card');
@@ -51,6 +52,10 @@ async function runWeekly({ offset = 0, dryRun = false, trigger = 'cron' } = {}) 
       throw new Error(`导入模式：已导入数据不覆盖本播报窗口 ${win.label}（导入于 ${(st.imported.importedAt || '').slice(0, 10)}，覆盖 ${st.imported.days || '?'}）`);
     }
     members = importService.mergeMembers(members, importService.deriveMembers(records));
+  } else if (config.dataSource === 'feishu') {
+    // 飞书考勤档（2026-10-07 定案的正路：数据在飞书考勤，应用身份全自动拉流水）
+    const r = await feishuAttendance.fetchFlows(win.start, win.end);
+    records = r.records;
   } else {
     const r = await zklinkClient.fetchTransactions(win.start, win.end);
     records = r.records;

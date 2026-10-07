@@ -484,3 +484,12 @@
 - 端点挂 :3006（`/api/attendance/policy|members|import|preview|test-broadcast`，鉴权复用 API_TOKEN）；打卡名单并入打卡 state（不新增 push 私有配置守卫面）；`.env` 新增 ZKLINK_* 十一键（ZKLINK_DATA_DIR=C:/home/qianli/duty-bot-data/zklink 等）；xlsx 入依赖；push.js 闸门改 `npm run test` 聚合（新建）+ tar 排除补 `.zklink-state.json`/`zklink-data`。
 - 测试：新增 6 套 120 断言（窗口 17/时长 22/导入 24/客户端 28/卡片块 15/留档 14），全仓 13 套全绿；冒烟验证周播/watchdog cron 挂载与原值日功能无恙。踩坑：`feishuDoc` 初版漏导出 `appendDocBlocks`（桩测试当场拦下）；duty-bot cron 为 6 段式（含秒），zklink cron 解析兼容 5/6 段。
 - 遗留：①云文档留档激活需给共用应用开 docx 权限 + wiki 只读 + 加为留档文档协作者（飞书后台人工，未配时本地兜底、卡片照发）；②http 直拉待曼波提供 ZKLink 账号（probe 校准）；③每周播报前需有人完成 ZKLink 网页端导出+导入（或配好 http 通道后全自动）。
+
+### v48b · 2026-10-07 · 随本提交落地 · feat
+
+**数据源定案飞书考勤（曼波确认「考勤组建在飞书考勤、数据在飞书侧」，ZKLink 网页 SSO 账号与数据无关）**
+
+- 新增 `src/zklink/feishuAttendance.js`（ZKLINK_DATA_SOURCE=feishu 推荐档）：`POST /attendance/v1/user_flows/query`（规格自飞书官方文档 Apifox 镜像核对：user_ids=employee_id、check_time_from/to 秒级字符串、响应 data.user_flow_results[]、check_time 秒、comment="上班打卡"、check_result Invalid=无效打卡）拉窗口内打卡流水 → 统一记录流（Invalid 标注 exception_type=无效打卡）；人员=通讯录全员 user_id（contact user_id_type=user_id 遍历，`ZKLINK_ATT_USER_IDS` 可显式收窄）；应用身份复用 APP_ID/SECRET。
+- 数据源三档定型：feishu（推荐全自动）/ import（ZKLink 网页导出上传兜底）/ http（ZKLink 接口直拉，仅独立账密账号；飞书 SSO 账号走 ZKLINK_ACCESS_TOKEN 静态 token 模式）。
+- `.env` 切 feishu 档；测试新增 stub-test-zklink-feishu-att.js 16 断言（显式名单/通讯录解析+姓名映射/考勤组/三档解析），全仓 14 套全绿。
+- 权限前置（飞书后台人工，报错 99991672 自带一键开通链接）：attendance:rule:readonly + 打卡流水 scope + contact:user.employee_id:readonly；未开权限时周报失败告警卡带指引，开齐后 watchdog 自动补。
