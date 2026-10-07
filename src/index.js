@@ -171,10 +171,10 @@ app.post('/api/bot/test-remind', requireApiToken, async (req, res) => {
   }
 });
 
-// D-7 值日预告手动触发（2026-09-24；dryRun 只回预览）
+// 提前预告手动触发（2026-10-07 起 D-7/D-3 通用：body 可带 {"daysAhead":3}，缺省 7；dryRun 只回预览）
 app.post('/api/bot/test-week-remind', requireApiToken, async (req, res) => {
   try {
-    res.json({ success: true, result: await inquiry.sendWeekAheadRemind({ dryRun: !!req.body?.dryRun }) });
+    res.json({ success: true, result: await inquiry.sendAheadRemind({ dryRun: !!req.body?.dryRun, daysAhead: req.body?.daysAhead }) });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

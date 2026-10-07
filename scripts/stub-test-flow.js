@@ -456,15 +456,30 @@ function check(desc, cond, detail = '') {
   check('brief：昨日 1 人（对账补的记录）、今日 3 人', brief.yesterday.members.length === 1 && brief.today.members.length === 3, JSON.stringify(brief.today));
   check('brief：昨日 dayStatus=null（未完成口径）', brief.yesterday.dayStatus === null);
 
-  // ---- 10. D-7 值日预告（2026-09-24 新增） ----
+  // ---- 10. 提前预告（D-7 / D-3，2026-10-07 v45 起双锚点、每天 3 次） ----
   const weekAhead = await inquiry.sendWeekAheadRemind({ dryRun: true });
-  check('D-7 预告：目标日=今天+7 且有班次可发',
-    weekAhead.date === addDays(today, 7) && weekAhead.sent.length > 0,
+  check('D-7 预告：目标日=今天+7、daysAhead=7 且有班次可发',
+    weekAhead.date === addDays(today, 7) && weekAhead.daysAhead === 7 && weekAhead.sent.length > 0,
     JSON.stringify({ date: weekAhead.date, sent: weekAhead.sent.length, skipped: weekAhead.skipped }));
   check('D-7 预告：文案点名日期与岗位（dryRun 预览）',
     weekAhead.sent.every((s) => s.preview.includes(weekAhead.date) && s.preview.includes(s.position)),
     JSON.stringify(weekAhead.sent.map((s) => s.name)));
   check('D-7 预告：请假引导指向两步确认', weekAhead.sent.every((s) => s.preview.includes('我要请假')));
+
+  // D-3 用例：生成阶段落在 +3 的班次可能被前序用例（请假/打卡）置过状态，先全部置已请假腾场，
+  // 再造一条干净班次——「三天后」文案与临期提示稳定命中（本节之后无用例依赖 +3 数据）
+  const d3Date = addDays(today, 3);
+  for (const r of await dutyTable.getRecordsByDate(d3Date)) {
+    if (!r.status) await dutyTable.setStatus(r.recordId, config.status.LEAVE);
+  }
+  await dutyTable.createDayRecords(d3Date, [{ member: roster.findByName('队员A'), position: '工位区' }]);
+  const threeAhead = await inquiry.sendAheadRemind({ dryRun: true, daysAhead: 3 });
+  check('D-3 预告：目标日=今天+3、daysAhead=3 且恰好命中新建班次',
+    threeAhead.date === d3Date && threeAhead.daysAhead === 3 && threeAhead.sent.length === 1,
+    JSON.stringify({ date: threeAhead.date, sent: threeAhead.sent.length, skipped: threeAhead.skipped }));
+  check('D-3 预告：「三天后」文案 + 临期尽早请假提示',
+    threeAhead.sent.every((s) => s.preview.includes('三天后') && s.preview.includes('尽早请假')),
+    JSON.stringify(threeAhead.sent.map((s) => s.preview)));
 
   console.log(failed === 0 ? `\n全部通过 ✅（临时目录 ${TMP}）` : `\n${failed} 项失败 ❌`);
   process.exit(failed === 0 ? 0 : 1);

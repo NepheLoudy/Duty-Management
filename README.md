@@ -85,7 +85,7 @@
 
 | 时刻 | 任务 | 说明 |
 | --- | --- | --- |
-| D-7 20:05 | 值日预告 | 私信一周后的当日值日队员（岗位+职责+请假引导；2026-09-24 新增——补偿/插入班次提前点名，留足请假余量；`DUTY_WEEK_REMIND_SCHEDULE`） |
+| D-7 / D-3 ×每天 3 次 | 值日预告 | 私信提前 7 天与 3 天的当日值日队员，每个提前天数每天 10:05/15:05/20:05 各点名一次（岗位+职责+请假引导，D-3 附临期尽早请假提示；2026-09-24 新增 D-7 单槽位、2026-10-07 v45 起扩为 D-7/D-3 双锚点×一天 3 次——补偿/插入班次提前点名留足请假余量，单条消息防淹没；`DUTY_AHEAD_REMIND_DAYS` / `DUTY_AHEAD_REMIND_SCHEDULES`） |
 | D-1 20:00 | 次日提醒 | 私信明日值日队员（岗位+职责+请假引导） |
 | D 日 18:30 | 当日询问 | 私信询问，开启监听窗口（打卡/否/照片）；成员有未过期 DDL 逾期确认时额外附冲突提示（查 hub /api/ddl/pending，失联降级不加） |
 | D 日 23:00 | 收口前临门提醒 | 私信当日仍未完结队员（还剩约 1 小时；已传照片者提示只需打卡）；2026-09-16 新增——询问后到收口无再触达是未做完主因 |
@@ -139,7 +139,7 @@
 | GET | `/api/duty/whitelist` | 运维台白名单（值日排除名单）读取 |
 | POST | `/api/duty/whitelist` | 白名单增删（X-API-Token，运维台定制中心直写通道） |
 | GET | `/api/duty/brief` | 昨日结果+今日名单一次取齐（M4 已由看板卡自身实现；本接口保留为通用数据接口） |
-| POST | `/api/bot/test-remind` / `test-week-remind` / `test-ask` / `test-lastcall` / `test-close` / `test-reconcile` | 手动触发（body `{"dryRun":true}` 只预览不发送/不落表；`test-week-remind`=D-7 预告，2026-09-24） |
+| POST | `/api/bot/test-remind` / `test-week-remind` / `test-ask` / `test-lastcall` / `test-close` / `test-reconcile` | 手动触发（body `{"dryRun":true}` 只预览不发送/不落表；`test-week-remind`=提前预告，body 可带 `{"daysAhead":3}` 缺省 7，v45 起 D-7/D-3 通用） |
 | POST | `/api/bot/test-generate` / `test-board` | 手动触发（**默认即预览**，body `{"confirm":true}` 才正式生成/实发） |
 | POST | `/api/bot/rebalance` | 排班重排（2026-09-25）：默认预览删除/义务重置清单，`{"confirm":true}` 执行（先自动全量备份） |
 | GET | `/api/bot/cron-status` | 定时任务与静默状态 |
@@ -147,10 +147,11 @@
 ## 配置
 
 `.env` 真值不进 git（本地 .env 是部署源头，push 时覆盖部署目标；`DEPLOY_*` 键，现=小电脑 192.168.31.57:22），键位清单见 `.env.example`：
-共用应用凭据、表格 token、字段名映射、八个 cron 时刻（六个排班域 + 值日看板 12:00 播报 + 快递整点播报）、生成跨度/间隔、`DUTY_ADMIN_OPEN_IDS`
+共用应用凭据、表格 token、字段名映射、cron 时刻（D-1 次日提醒、提前预告天数与每日槽位 `DUTY_AHEAD_REMIND_DAYS/SCHEDULES`、
+18:30 询问、23:00 临门、24:00 收口、00:30 对账、看板 12:00 播报、快递整点播报）、生成跨度/间隔、`DUTY_ADMIN_OPEN_IDS`
 （可选覆盖）、看板限流、看板 webhook 通道（`DUTY_BOARD_WEBHOOK_URL/SECRET`）、
 `DUTY_STATE_FILE`（**生产必须放项目目录之外**，SFTP 部署会清空
-`/c/qianli/opt/duty-bot`）、`QUIET_HOURS_*`、NAS 连接。
+`/c/qianli/opt/duty-bot`）、`QUIET_HOURS_*`、部署连接。
 
 ### 隐私约定（重要）
 

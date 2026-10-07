@@ -6,6 +6,12 @@ function parseArrayConfig(value) {
   return value.split(',').map(v => v.trim()).filter(v => Boolean);
 }
 
+// 提前预告天数（逗号分隔，如 7,3）；非法/空回落默认 [7,3]
+function parseAheadDays(value, fallback) {
+  const days = parseArrayConfig(value).map((s) => Number(s)).filter((n) => Number.isFinite(n) && n >= 1);
+  return days.length ? days : fallback;
+}
+
 // ============================================================
 // duty-bot（值日提醒机器人）
 // 与所有 qianli 项目共用同一个飞书应用（APP_ID 相同）。
@@ -75,9 +81,15 @@ module.exports = {
 
   schedule: {
     prevRemind: process.env.DUTY_PREV_REMIND_SCHEDULE || '0 0 20 * * *',
-    // D-7 值日预告（2026-09-24 新增）：提前一周私信点名班次，留足请假余量；
-    // 20:05 与次日提醒（20:00）错峰
-    weekRemind: process.env.DUTY_WEEK_REMIND_SCHEDULE || '0 5 20 * * *',
+    // 提前预告（2026-10-07 新口径，替代原 D-7 单槽位 DUTY_WEEK_REMIND_SCHEDULE）：
+    // 每个提前天数（默认 7 与 3）在下列每个时刻各私信点名一次——默认 10:05/15:05/20:05
+    // 一天 3 次，统一取 :05 与快递整点播报、D-1 20:00 次日提醒错峰；
+    // schedules 为 node-cron 表达式列表（分号分隔），同一 runner 挂全部槽位
+    aheadRemind: {
+      days: parseAheadDays(process.env.DUTY_AHEAD_REMIND_DAYS, [7, 3]),
+      schedules: (process.env.DUTY_AHEAD_REMIND_SCHEDULES || '0 5 10 * * *;0 5 15 * * *;0 5 20 * * *')
+        .split(';').map((s) => s.trim()).filter(Boolean),
+    },
     ask: process.env.DUTY_ASK_SCHEDULE || '0 30 18 * * *',
     // 收口前 1 小时临门提醒（2026-09-16 新增；2026-09-17 随收口推迟到 23:00）
     lastCall: process.env.DUTY_LASTCALL_SCHEDULE || '0 0 23 * * *',

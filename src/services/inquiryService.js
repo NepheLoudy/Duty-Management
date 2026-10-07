@@ -73,14 +73,20 @@ async function sendPrevDayRemind(options = {}) {
 }
 
 /**
- * D-7 20:05 值日预告（2026-09-24 新增）：私信一周后的当日值日队员。
+ * 提前值日预告（2026-10-07 新口径，原 D-7 单槽位扩展）：私信 daysAhead 天后的当日值日队员。
+ * D-7 与 D-3 各点名一轮，每天 3 次（槽位由 DUTY_AHEAD_REMIND_SCHEDULES 驱动，默认 10:05/15:05/20:05）。
  * 动机：被补偿/加罚插入的班次队员往往临近才发现自己有班（临时请假牵动补偿安置），
- * 提前一周点名，留足请假/换安排的余量。预告不带打卡指引（D-1 20:00 次日提醒再发详细版）。
- * @returns {{date, sent: number, skipped: Array, preview: Array}}
+ * 提前一周点名留足请假/换安排的余量；单条消息易被淹没，一天 3 次保触达；
+ * D-3 再收敛一轮（临近仍可请假，方便补偿安置）。预告不带打卡指引（D-1 20:00 次日提醒再发详细版）。
+ * @returns {{date, daysAhead, sent: number, skipped: Array, preview: Array}}
  */
-async function sendWeekAheadRemind(options = {}) {
+async function sendAheadRemind(options = {}) {
   const dryRun = Boolean(options.dryRun);
-  const date = addDays(todayStr(), 7);
+  const daysAhead = Number.isFinite(Number(options.daysAhead)) && Number(options.daysAhead) >= 1
+    ? Math.trunc(Number(options.daysAhead))
+    : 7;
+  const date = addDays(todayStr(), daysAhead);
+  const whenText = daysAhead === 7 ? '一周后' : daysAhead === 3 ? '三天后' : `${daysAhead} 天后`;
   const recs = await dutyTable.getRecordsByDate(date);
 
   const sent = [];
@@ -93,10 +99,11 @@ async function sendWeekAheadRemind(options = {}) {
       continue;
     }
     const text = [
-      `📅 值日预告：一周后（${date}）是你的值日日，岗位【${rec.position}】`,
+      `📅 值日预告：${whenText}（${date}）是你的值日日，岗位【${rec.position}】`,
       `职责：${positionDutyText(rec.position)}`,
       '',
-      '提前留意当天的时间安排；如需请假，届时回复「我要请假」即可（请假当日该岗由同日队员兼顾，下周自动补一次值日）。',
+      '提前留意当天的时间安排；如需请假，回复「我要请假」即可（请假当日该岗由同日队员兼顾，下周自动补一次值日）。',
+      ...(daysAhead <= 3 ? [`距离值日只剩 ${daysAhead} 天，时间有冲突请尽早请假，方便安排补偿。`] : []),
     ].join('\n');
     if (dryRun) {
       sent.push({ name: member.name, position: rec.position, preview: text });
@@ -111,7 +118,12 @@ async function sendWeekAheadRemind(options = {}) {
     }
   }
 
-  return { date, sent, skipped, preview: sent.map((s) => `${s.name}（${s.position}）`) };
+  return { date, daysAhead, sent, skipped, preview: sent.map((s) => `${s.name}（${s.position}）`) };
+}
+
+/** 兼容旧入口：D-7 预告（flow 桩测试与 /api/bot/test-week-remind 手动接口沿用） */
+function sendWeekAheadRemind(options = {}) {
+  return sendAheadRemind({ daysAhead: 7, ...options });
 }
 
 /**
@@ -540,6 +552,7 @@ async function sendCloseNotifications(notifications) {
 module.exports = {
   positionDutyText,
   sendPrevDayRemind,
+  sendAheadRemind,
   sendWeekAheadRemind,
   sendLastCall,
   askToday,

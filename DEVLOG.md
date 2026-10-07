@@ -442,3 +442,13 @@
 - push.js 读键/注释/报错文案（nasConfig→deployConfig）、.env.example、AGENTS.md 部署行、本地 .env 键改名（push 时覆盖部署目标同批生效）；
 - README 并入上批遗留文档对齐：快递表「备注」列（v43 引入）说明、cron 时刻数八个口径；
 - 不影响运行时行为（部署连接键服务进程不消费）；2026-09-12 v9 事故记录保持原貌。
+
+## v45 · 2026-10-07 · 随本提交落地 · feat
+
+**提前预告扩容：D-7/D-3 双锚点、每个锚点一天 3 次点名（曼波新需求）**
+
+- 需求口径：提前一周和提前三天都要提醒，一天通知 3 次——原 D-7 单槽位（20:05）扩展为 D-7 与 D-3 各点名一轮，每天 10:05/15:05/20:05 各一次（统一取 :05，与快递整点播报、D-1 20:00 次日提醒错峰）；
+- 实现：`inquiryService.sendAheadRemind({daysAhead})` 泛化（D-3 文案追加「临期尽早请假方便补偿」提示；`sendWeekAheadRemind` 保留为 D-7 兼容入口）；`config.schedule.weekRemind` → `aheadRemind{days,schedules}`（`DUTY_AHEAD_REMIND_DAYS=7,3`、`DUTY_AHEAD_REMIND_SCHEDULES` 分号分隔多条 cron，旧键 `DUTY_WEEK_REMIND_SCHEDULE` 废弃）；cron 同一 runner 挂全部槽位、静默积压按任务名合并（各槽位内容一致，冲刷重跑无损失）；`POST /api/bot/test-week-remind` 支持 body `{"daysAhead":3}`；
+- 定时任务数 8 → 13（6 常规 + 提前预告 2 域×3 槽位 + 收口），cron-status 的 running 阈值 ≥6 不变；
+- 文档同步：.env.example / README（定时任务表、API 表、配置段）/ AGENTS.md 私信链行；
+- 测试：flow 桩第 10 节扩为 D-7/D-3 双断言（daysAhead 透传、「三天后」文案、临期提示）；七套 stub 全绿（exit 0）。
