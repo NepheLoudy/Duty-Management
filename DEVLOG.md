@@ -502,3 +502,13 @@
 - 🟡 minor 十二件：失败分支 delivery 水位补周期门控（历史周补播失败不再污染当前周快照）；feishuAttError hint 改为直接指引报错内 scope/一键链接（原文案引用 .env 不存在的记录）；policy 窗口标注 attGroupId 仅 http 档生效；两处退化断言改真断言（静态 token Authorization 头真验/子部门递归独立返回路径验证）；parseCron 导出+回退 warn+5 断言（5/6 段/每小时回退/列表步进回退/垃圾输入，审查时覆盖缺口补齐）；zklink-data/.zklink-state.json 入 .gitignore（PII 防入库）；test-broadcast 重入返回可读 409；飞书考勤三处 res.json 补容错（非 JSON 响应给可读错误）；alertFailure 未用的 manual 参数删除；README 披露两条已知边界（云文档多批追加非原子/watchdog 只补最近周期）与 preview 无鉴权口径。
 - 误报剔除 4 项（双子代理一致）：user_flows/query 无分页（官方文档核实）、state 并发竞态（同步写盘原子）、周窗口边界（测试覆盖）、端点鉴权与凭据泄漏（fail-closed 齐全）。
 - 全仓 14 套测试全绿（zklink 系 +5 断言，修正一处审查测试自身期望写反：每小时 cron 形态应回退而非解析成功——parseCron 只服务周播形态）。
+
+### v48d · 2026-10-08 · 随本提交落地 · feat
+
+**考勤组规则口径（曼波定：组内没打卡的人 0 时长也要出现在周报里）**
+
+- 缺口：feishu 档名单原本由打卡记录派生——没人打卡的周名单为空，未打卡者直接消失。聚合层本就支持零记录者列 0 天（王五 0 天断言一直在），缺的是名单来源。
+- 新增 `resolveGroupMembers()`：名单以**飞书考勤组成员**为准——组选择 ZKLINK_ATT_GROUP_NAME（组名直觉）> ZKLINK_ATT_GROUP_ID > 平台仅一个组自动取用；成员字段多形态容错（member.member_list/members/member_ids）；姓名经通讯录映射、组外人员 userid 兜底。取不到时（未配置/无 attendance:rule:readonly 权限/组不匹配）回落通讯录全员并 warn，不炸周报。
+- service.js feishu 分支接入：members = 考勤组成员 ∪ 既有名单；0 打卡者 0 天 0 时长 + 周报卡橙色头提醒（聚合层现成行为）。
+- 测试 +5 断言（组名匹配/姓名映射/组外兜底/未配置原因/无成员列表权限提示）共 21，全仓 14 套全绿。
+- 待曼波：.env 填 ZKLINK_ATT_GROUP_NAME（考勤组名）；考勤组列表接口需 attendance:rule:readonly 权限（未开则自动回落通讯录全员口径，周报不炸）。

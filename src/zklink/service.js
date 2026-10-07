@@ -56,6 +56,28 @@ async function runWeekly({ offset = 0, dryRun = false, trigger = 'cron' } = {}) 
     // 飞书考勤档（2026-10-07 定案的正路：数据在飞书考勤，应用身份全自动拉流水）
     const r = await feishuAttendance.fetchFlows(win.start, win.end);
     records = r.records;
+    // 考勤组规则（曼波 2026-10-08 定）：周报名单以考勤组成员为准——没打卡的人 0 时长
+    // 也要出现（aggregateDuration 对名单内零记录者列 0 天）。取不到时回落通讯录全员
+    // （仍强于只按打卡记录派生——那会让没人打卡的周整体消失），不炸周报。
+    try {
+      const gm = await feishuAttendance.resolveGroupMembers();
+      if (gm.members && gm.members.length) {
+        members = importService.mergeMembers(members, gm.members);
+        console.log(`[打卡周报] 考勤组「${gm.group.groupName}」名单 ${gm.members.length} 人（未打卡者 0 时长呈现）`);
+      } else {
+        const users = await feishuAttendance.listUsersWithUserId();
+        members = importService.mergeMembers(members, users);
+        console.warn(`[打卡周报] 考勤组名单未取到（${gm.reason}），回落通讯录全员 ${users.length} 人口径`);
+      }
+    } catch (e) {
+      console.warn(`[打卡周报] 考勤组名单解析失败（${e.message}），回落通讯录全员口径`);
+      try {
+        const users = await feishuAttendance.listUsersWithUserId();
+        members = importService.mergeMembers(members, users);
+      } catch (e2) {
+        console.warn(`[打卡周报] 通讯录名单也取不到（${e2.message}），名单退化为打卡记录派生`);
+      }
+    }
   } else {
     const r = await zklinkClient.fetchTransactions(win.start, win.end);
     records = r.records;

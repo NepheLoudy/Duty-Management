@@ -116,6 +116,51 @@ function check(name, cond, extra = '') {
   check('非法档回落 import', cfg.dataSource === 'import');
   delete process.env.ZKLINK_DATA_SOURCE;
 
+  console.log('\n== 5. 考勤组成员解析（考勤组规则口径：未打卡者 0 时长呈现） ==');
+  process.env.ZKLINK_ATT_GROUP_NAME = '实验室考勤组';
+  delete require.cache[require.resolve('../src/zklink/config')];
+  delete require.cache[require.resolve('../src/zklink/feishuAttendance')];
+  const att5 = require('../src/zklink/feishuAttendance');
+  global.fetch = async (url) => {
+    const u = String(url);
+    if (u.includes('tenant_access_token')) return { json: async () => ({ code: 0, tenant_access_token: 't-5', expire: 7200 }) };
+    if (u.includes('attendance/v1/groups')) return { json: async () => ({ code: 0, data: { items: [
+      { group_id: 'g9', group_name: '实验室考勤组', member_count: 2, member: { member_type: 'acy', member_list: [{ id: 'u_abc' }, { id: 'u_ghost' }] } },
+    ] } }) };
+    if (u.includes('/contact/v3/users')) return { json: async () => ({ code: 0, data: { items: [
+      { user_id: 'u_abc', name: '张三', department_ids: [] },
+      { user_id: 'u_def', name: '李四', department_ids: [] },
+    ] } }) };
+    return { json: async () => ({ code: 1, msg: `unexpected ${u}` }) };
+  };
+  const gm5 = await att5.resolveGroupMembers();
+  check('组名匹配 + 成员解析 2 人', gm5.members && gm5.members.length === 2 && gm5.group.groupId === 'g9', JSON.stringify(gm5));
+  check('成员带通讯录姓名', gm5.members[0].name === '张三', JSON.stringify(gm5.members[0]));
+  check('通讯录外成员 userid 兜底姓名', gm5.members[1].name === 'u_ghost', JSON.stringify(gm5.members[1]));
+
+  console.log('\n== 6. 组选择回退：唯一组自动取用 / 响应无成员给 reason ==');
+  delete process.env.ZKLINK_ATT_GROUP_NAME;
+  delete require.cache[require.resolve('../src/zklink/config')];
+  delete require.cache[require.resolve('../src/zklink/feishuAttendance')];
+  const att6 = require('../src/zklink/feishuAttendance');
+  const gm6 = await att6.resolveGroupMembers();
+  check('未配置组 → null+原因', gm6.members === null && String(gm6.reason).includes('未配置考勤组'), JSON.stringify(gm6));
+  process.env.ZKLINK_ATT_GROUP_NAME = '实验室考勤组';
+  delete require.cache[require.resolve('../src/zklink/config')];
+  delete require.cache[require.resolve('../src/zklink/feishuAttendance')];
+  const att6b = require('../src/zklink/feishuAttendance');
+  global.fetch = async (url) => {
+    const u = String(url);
+    if (u.includes('tenant_access_token')) return { json: async () => ({ code: 0, tenant_access_token: 't-6', expire: 7200 }) };
+    if (u.includes('attendance/v1/groups')) return { json: async () => ({ code: 0, data: { items: [
+      { group_id: 'g9', group_name: '实验室考勤组', member_count: 5 }, // 无 member 字段
+    ] } }) };
+    if (u.includes('/contact/v3/users')) return { json: async () => ({ code: 0, data: { items: [] } }) };
+    return { json: async () => ({ code: 1, msg: `unexpected ${u}` }) };
+  };
+  const gm6b = await att6b.resolveGroupMembers();
+  check('响应无成员列表 → null+权限提示', gm6b.members === null && String(gm6b.reason).includes('member_count=5'), JSON.stringify(gm6b));
+
   console.log(`\n结果：${pass} 通过 / ${fail} 失败`);
   process.exit(fail === 0 ? 0 : 1);
 })().catch((e) => { console.error(e); process.exit(1); });

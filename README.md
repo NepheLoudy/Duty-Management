@@ -156,8 +156,9 @@
   未配置时本地兜底、卡片照发；本地 `duty-bot-data/zklink/archive/` 每周落盘 JSON 全量 + CSV；
 - **数据源三档**（`ZKLINK_DATA_SOURCE`）：`feishu` **推荐（2026-10-07 定案：数据在飞书考勤，
   曼波在飞书「考勤」应用建的考勤组）**——`POST /attendance/v1/user_flows/query` 拉打卡流水，
-  应用身份复用 `APP_ID/APP_SECRET` 全自动无人值守；人员=通讯录全员 user_id（
-  `ZKLINK_ATT_USER_IDS` 可显式收窄）；飞书后台需开考勤权限（`attendance:rule:readonly`、
+  应用身份复用 `APP_ID/APP_SECRET` 全自动无人值守；名单以**飞书考勤组成员为准**（曼波 2026-10-08 定「考勤组规则」：
+  组内没打卡的人 0 时长也要呈现；`ZKLINK_ATT_GROUP_NAME` 填组名 / 仅一个组自动取用；取不到回落通讯录全员），
+  拉流水人员=通讯录全员 user_id（`ZKLINK_ATT_USER_IDS` 可显式收窄）；飞书后台需开考勤权限（`attendance:rule:readonly`、
   打卡流水、`contact:user.employee_id:readonly`，报错 99991672 自带一键开通链接）。
   `import` 兜底——ZKLink 网页端（考勤 → 打卡记录）导出 xlsx/csv →
   `POST /api/attendance/import` 上传（容错列匹配，「打卡时间」单列与「日期+时间」分列都认，

@@ -29,6 +29,9 @@ const config = {
 
   // 飞书考勤档：打卡人员 user_id 显式名单（逗号分隔，可空=通讯录全员 user_id）
   attUserIds: process.env.ZKLINK_ATT_USER_IDS || '',
+  // 考勤组（「考勤组规则」口径，曼波 2026-10-08 定：周报名单以考勤组成员为准，未打卡=0 时长可见）
+  // 组名直觉好填；ID 亦可。两者都空且平台只有一个考勤组时自动取用。
+  attGroupName: process.env.ZKLINK_ATT_GROUP_NAME || '',
 
   zklinkBaseUrl: (process.env.ZKLINK_BASE_URL || 'https://zklink.zktecoiot.com').replace(/\/+$/, ''),
   zklinkUsername: process.env.ZKLINK_USERNAME || '',

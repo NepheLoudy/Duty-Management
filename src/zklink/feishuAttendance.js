@@ -82,11 +82,41 @@ async function listGroups() {
     const j = await readJson(res);
     if (j.code !== 0) throw feishuAttError(j.code, j.msg);
     for (const g of (j.data && j.data.items) || []) {
-      groups.push({ groupId: g.group_id, groupName: g.group_name, memberCount: g.member_count });
+      // 成员字段多形态容错（列表接口的成员携带形态以实测为准）：
+      // g.member.member_list[].id / g.member.members[].user_id / g.member_ids[]
+      const raw = (g.member && (g.member.member_list || g.member.members)) || g.member_ids || g.members || [];
+      const memberIds = raw.map((m) => (typeof m === 'string' ? m : (m.id || m.user_id || m.member_id))).filter(Boolean);
+      groups.push({ groupId: g.group_id, groupName: g.group_name, memberCount: g.member_count, memberIds });
     }
     pageToken = (j.data && j.data.page_token) || '';
   } while (pageToken);
   return groups;
+}
+
+// 考勤组成员名单（「考勤组规则」口径，曼波 2026-10-08 定：组内每人都要进周报，未打卡=0 时长可见）
+// 组选择：ZKLINK_ATT_GROUP_NAME 按组名 > ZKLINK_ATT_GROUP_ID 按 id > 平台仅一个考勤组时自动取用。
+// 返回 { members: [{userid,name}] | null, reason }——null=取不到（调用方回落通讯录全员）
+async function resolveGroupMembers() {
+  if (!config.attGroupId && !config.attGroupName) {
+    return { members: null, reason: '未配置考勤组（ZKLINK_ATT_GROUP_NAME 填组名 / ZKLINK_ATT_GROUP_ID 填 id）' };
+  }
+  const groups = await listGroups();
+  let g = null;
+  if (config.attGroupId) g = groups.find((x) => x.groupId === config.attGroupId);
+  if (!g && config.attGroupName) g = groups.find((x) => x.groupName === config.attGroupName);
+  if (!g && groups.length === 1) g = groups[0]; // 平台仅一个考勤组时自动取用
+  if (!g) {
+    return { members: null, reason: `考勤组未匹配（配置：${config.attGroupName || config.attGroupId || '无'}；平台现有：${groups.map((x) => x.groupName).join('、') || '无'}）` };
+  }
+  if (!g.memberIds.length) {
+    return { members: null, reason: `考勤组「${g.groupName}」响应未携带成员列表（member_count=${g.memberCount}），需 attendance:rule:readonly 权限或接口形态变化` };
+  }
+  const users = await listUsersWithUserId();
+  const nameMap = new Map(users.map((u) => [u.userid, u.name]));
+  return {
+    members: g.memberIds.map((id) => ({ userid: id, name: nameMap.get(id) || id })),
+    group: { groupId: g.groupId, groupName: g.groupName },
+  };
 }
 
 // user_ids 解析：env 显式配置 > 通讯录全员（user_id 标识）
@@ -140,4 +170,4 @@ async function fetchFlows(startMs, endMs) {
   return { records, userCount: userIds.length };
 }
 
-module.exports = { fetchFlows, listGroups, listUsersWithUserId, resolveUserIds };
+module.exports = { fetchFlows, listGroups, listUsersWithUserId, resolveUserIds, resolveGroupMembers };
