@@ -8,11 +8,11 @@
  *
  * 流程：
  *   [1/4] 代码提交推送到 GitHub（失败则标记，稍后改走 SFTP 直传）
- *   [2/4] 部署代码到 NAS（git push 成功走 git fetch，失败走 SFTP 打包直传）
+ *   [2/4] 部署代码到部署目标（git push 成功走 git fetch，失败走 SFTP 打包直传）
  *   [3/4] 上传 .env 与真实名册/白名单到部署目标（含飞书密钥与成员信息，只单独存部署目标，绝不进 git）
  *   [4/4] npm install + 重启服务
  *
- * NAS 连接配置从 .env 读取（NAS_HOST/NAS_PORT/NAS_USER/NAS_PASSWORD），脚本不存任何密钥。
+ * 部署目标连接配置从 .env 读取（DEPLOY_HOST/DEPLOY_PORT/DEPLOY_USER/DEPLOY_PASSWORD），脚本不存任何密钥。
  */
 const { spawnSync } = require('child_process');
 const { Client } = require('ssh2');
@@ -54,8 +54,8 @@ const PM2_NAME = 'duty-bot';
 
 // 真实名册/白名单在 .gitignore 里（含成员姓名与 open_id，绝不进 git），
 // 但部署目标运行必须有：走 git 路径部署时仓库里没有这两个文件，这里显式 SFTP 补齐。
-// 【运行时数据保护】这两份文件的权威编辑路径在 NAS 侧（运维台/定制窗口），本地只是种子：
-// 上传前先备份 NAS 现网版本；本地条目数少于现网时跳过上传（PUSH_FORCE_PRIVATE=1 强制覆盖）。
+// 【运行时数据保护】这两份文件的权威编辑路径在部署目标侧（运维台/定制窗口），本地只是种子：
+// 上传前先备份部署目标现网版本；本地条目数少于现网时跳过上传（PUSH_FORCE_PRIVATE=1 强制覆盖）。
 // 事故记录：2026-09-12 v9 推送曾用本地空 whitelist.json 覆盖 NAS 18 人排除名单（不可恢复）。
 const PRIVATE_CONFIG_FILES = ['config/members.json', 'config/whitelist.json', 'config/policy-override.json'];
 const DATA_DIR = '/c/home/qianli/duty-bot-data';
@@ -75,14 +75,14 @@ function countEntries(content) {
   }
 }
 
-const nasConfig = {
-  host: process.env.NAS_HOST,
-  port: Number(process.env.NAS_PORT || 22),
-  username: process.env.NAS_USER,
-  password: process.env.NAS_PASSWORD,
+const deployConfig = {
+  host: process.env.DEPLOY_HOST,
+  port: Number(process.env.DEPLOY_PORT || 22),
+  username: process.env.DEPLOY_USER,
+  password: process.env.DEPLOY_PASSWORD,
 };
-if (!nasConfig.host || !nasConfig.password) {
-  console.error('缺少 NAS 部署配置：请在 .env 中配置 NAS_HOST/NAS_PORT/NAS_USER/NAS_PASSWORD');
+if (!deployConfig.host || !deployConfig.password) {
+  console.error('缺少部署配置：请在 .env 中配置 DEPLOY_HOST/DEPLOY_PORT/DEPLOY_USER/DEPLOY_PASSWORD');
   process.exit(1);
 }
 
@@ -109,13 +109,13 @@ if (hasChanges) {
 const push = spawnSync('git', ['push'], { stdio: 'inherit' });
 const gitPushed = push.status === 0;
 if (gitPushed) {
-  console.log('✓ git push 成功，NAS 将通过 git fetch 拉取代码');
+  console.log('✓ git push 成功，部署目标将通过 git fetch 拉取代码');
 } else {
-  console.log('⚠ git push 失败（本地无法访问 GitHub 443 或远端未建仓），改用 SFTP 直传代码到 NAS');
+  console.log('⚠ git push 失败（本地无法访问 GitHub 443 或远端未建仓），改用 SFTP 直传代码到部署目标');
 }
 
-// ============ 连接 NAS ============
-console.log('\n========== [2/4] 连接 NAS 部署代码 ==========');
+// =* 连接部署目标 =*
+console.log('\n========== [2/4]=* 连接部署目标 ==========');
 
 const conn = new Client();
 
@@ -185,7 +185,7 @@ async function deployCode(sftp, plan) {
       + 'git fetch origin main && git reset --hard origin/main';
     const code = await execCode(cmd);
     if (code === 0) return npmInstall(sftp, plan);
-    console.log('⚠ NAS 拉取 GitHub 失败（NAS 网络不通），改用 SFTP 直传代码');
+    console.log('⚠ 部署目标拉取 GitHub 失败（目标机网络不通），改用 SFTP 直传代码');
   }
   {
     console.log('本地打包代码...');
@@ -221,7 +221,7 @@ async function deployCode(sftp, plan) {
         conn.end();
         process.exit(1);
       }
-      console.log('上传代码包到 NAS...');
+      console.log('上传代码包到部署目标...');
       sftp.fastPut(TAR_LOCAL, TAR_REMOTE_WIN, (err2) => {
         if (err2) {
           console.error('代码上传失败:', err2.message);
@@ -245,7 +245,7 @@ function npmInstall(sftp, plan) {
 
 // ============ [3/4] 上传 .env 与私有配置 ============
 function uploadEnv(sftp, plan) {
-  console.log('\n========== [3/4] 上传 .env 与真实名册/白名单到 NAS ==========');
+  console.log('\n========== [3/4] 上传 .env 与真实名册/白名单到部署目标 ==========');
   conn.sftp((err, sftp2) => {
     if (err) {
       console.error('SFTP 失败:', err.message);
@@ -263,7 +263,7 @@ function uploadEnv(sftp, plan) {
         }
         console.log('✓ .env 已上传');
         applyPrivateConfig(sftp2, 0, plan, () => {
-          console.log('✓ 配置已上传到 NAS（含飞书密钥与成员信息，仅存于 NAS，不进 git）');
+          console.log('✓ 配置已上传到部署目标（含飞书密钥与成员信息，仅存于部署目标，不进 git）');
           restart();
         });
       });
@@ -317,7 +317,7 @@ function planPrivateConfig(sftp, i, plan, done) {
     }
     if (remoteCount > localCount && process.env.PUSH_FORCE_PRIVATE !== '1') {
       // 本地种子过期（含本地缺文件）：跳过覆盖，回填本地 + 记入 plan 待替换后回写远端
-      console.warn(`⚠ [私有配置保护] 将跳过 ${f} 覆盖：本地 ${localCount} 条 < NAS 现网 ${remoteCount} 条（本地种子过期，权威在 NAS 侧）。`);
+      console.warn(`⚠ [私有配置保护] 将跳过 ${f} 覆盖：本地 ${localCount} 条 < 部署目标现网 ${remoteCount} 条（本地种子过期，权威在部署目标侧）。`);
       console.warn('  确认要用本地覆盖请设 PUSH_FORCE_PRIVATE=1 重跑；现网内容已回填本地以防丢失。');
       fs.writeFileSync(path.join(__dirname, f), remoteContent);
       plan[f] = { action: 'restore', remoteContent };
@@ -425,5 +425,5 @@ function restart() {
   });
 }
 
-console.log('正在连接 NAS...');
-conn.connect(nasConfig);
+console.log('正在连接部署目标...');
+conn.connect(deployConfig);

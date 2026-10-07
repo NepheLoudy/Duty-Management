@@ -114,7 +114,7 @@
 - `快递`（带不带 `/` 均可，群 @ 或私聊）：开启 **5 分钟登记窗口**并群发引导——窗口内群里
   直接发「取件码」文字（可跟一张快递照片），逐条登记进「机器人项目看板」base 的**「快递」表**
   （发起人=消息发送者、快递内容=照片、取件码、是否取件=未取由机器人填写；表结构用户手工建，
-  `create-plaza-tables.js` 幂等补 登记时间/取件时间/消息ID 三列）。窗口结束群发登记摘要并现场编号。
+  `create-plaza-tables.js` 幂等补 登记时间/取件时间/消息ID/备注 四列，备注列供取件确认人留痕 v43）。窗口结束群发登记摘要并现场编号。
 - 窗口内非@消息由 **hub 观察转发**（`maybeForwardExpressObserve` → `POST /api/chat/command`
   `type:'express_observe'`）收集——duty-bot 仍不消费消息事件；无窗口时静默忽略，零噪音。
 - `查询当前快递`：当前未取清单与编号（查询即刷新编号，按登记顺序 1..N）。
@@ -146,8 +146,8 @@
 
 ## 配置
 
-`.env` 真值不进 git（本地 .env 是部署源头，push 时覆盖部署目标；`NAS_*` 键为历史命名，现=小电脑 192.168.31.57:22），键位清单见 `.env.example`：
-共用应用凭据、表格 token、字段名映射、六个 cron 时刻（另有快递整点播报时刻）、生成跨度/间隔、`DUTY_ADMIN_OPEN_IDS`
+`.env` 真值不进 git（本地 .env 是部署源头，push 时覆盖部署目标；`DEPLOY_*` 键，现=小电脑 192.168.31.57:22），键位清单见 `.env.example`：
+共用应用凭据、表格 token、字段名映射、八个 cron 时刻（六个排班域 + 值日看板 12:00 播报 + 快递整点播报）、生成跨度/间隔、`DUTY_ADMIN_OPEN_IDS`
 （可选覆盖）、看板限流、看板 webhook 通道（`DUTY_BOARD_WEBHOOK_URL/SECRET`）、
 `DUTY_STATE_FILE`（**生产必须放项目目录之外**，SFTP 部署会清空
 `/c/qianli/opt/duty-bot`）、`QUIET_HOURS_*`、NAS 连接。
