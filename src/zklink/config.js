@@ -11,6 +11,8 @@
 // cron 口径与 duty-bot 全仓一致：node-cron 6 段式（秒 分 时 日 月 周）；也兼容 5 段。
 // ============================================================
 const path = require('path');
+// 幂等 dotenv：生产由主 config 先加载（此处不覆盖已存在值），独立调用/脚本时兜底加载
+require('dotenv').config({ path: path.join(__dirname, '..', '..', '.env') });
 
 const ROOT = path.join(__dirname, '..', '..');
 // 运行时数据目录默认在项目内（本地开发），部署目标 .env 指向项目外 duty-bot-data/zklink/
