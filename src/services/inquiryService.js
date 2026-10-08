@@ -74,12 +74,31 @@ async function sendPrevDayRemind(options = {}) {
 
 /**
  * 提前值日预告（2026-10-07 新口径，原 D-7 单槽位扩展）：私信 daysAhead 天后的当日值日队员。
- * D-7 与 D-3 各点名一轮，每天 3 次（槽位由 DUTY_AHEAD_REMIND_SCHEDULES 驱动，默认 10:05/15:05/20:05）。
+ * D-7 与 D-3 各点名一轮，每天 3 个槽位（DUTY_AHEAD_REMIND_SCHEDULES 驱动，默认 10:05/15:05/20:05）。
  * 动机：被补偿/加罚插入的班次队员往往临近才发现自己有班（临时请假牵动补偿安置），
- * 提前一周点名留足请假/换安排的余量；单条消息易被淹没，一天 3 次保触达；
- * D-3 再收敛一轮（临近仍可请假，方便补偿安置）。预告不带打卡指引（D-1 20:00 次日提醒再发详细版）。
+ * 提前一周点名留足请假/换安排的余量；D-3 再收敛一轮（临近仍可请假，方便补偿安置）。
+ * 预告不带打卡指引（D-1 20:00 次日提醒再发详细版）。
+ * 当日去重（2026-10-08 v48f）：每人每天每域只发一条——首个槽位发全员，后续槽位只补
+ * 首枪发送失败者与期间新入排班者，已收到者跳过。三槽位语义从「重复点名」收敛为
+ * 「失败兜底」；原「一天 3 次保触达」口径在实际观感是重复轰炸（10-08 曼波反馈）。
  * @returns {{date, daysAhead, sent: number, skipped: Array, preview: Array}}
  */
+function aheadRemindKey(daysAhead) {
+  return `${todayStr()}|${daysAhead}`;
+}
+
+/** 记「今日该域已成功预告」（只记发送成功者，失败不记留给下枪补）；顺手清非今日键防膨胀 */
+function markAheadReminded(key, openId) {
+  state.mutate((s) => {
+    const todayPrefix = `${todayStr()}|`;
+    s.aheadReminded = s.aheadReminded || {};
+    for (const k of Object.keys(s.aheadReminded)) {
+      if (!k.startsWith(todayPrefix)) delete s.aheadReminded[k];
+    }
+    s.aheadReminded[key] = { ...(s.aheadReminded[key] || {}), [openId]: true };
+  });
+}
+
 async function sendAheadRemind(options = {}) {
   const dryRun = Boolean(options.dryRun);
   const daysAhead = Number.isFinite(Number(options.daysAhead)) && Number(options.daysAhead) >= 1
@@ -89,6 +108,9 @@ async function sendAheadRemind(options = {}) {
   const whenText = daysAhead === 7 ? '一周后' : daysAhead === 3 ? '三天后' : `${daysAhead} 天后`;
   const recs = await dutyTable.getRecordsByDate(date);
 
+  const remindedKey = aheadRemindKey(daysAhead);
+  const remindedToday = new Set(Object.keys((state.load().aheadReminded || {})[remindedKey] || {}));
+
   const sent = [];
   const skipped = [];
   for (const rec of recs) {
@@ -96,6 +118,10 @@ async function sendAheadRemind(options = {}) {
     const member = roster.findByName(rec.name);
     if (!member || !member.openId) {
       skipped.push({ name: rec.name || '（未绑定）', reason: '未绑定账号' });
+      continue;
+    }
+    if (!dryRun && remindedToday.has(member.openId)) {
+      skipped.push({ name: member.name, reason: '今日已预告（去重不重发）' });
       continue;
     }
     const text = [
@@ -111,6 +137,7 @@ async function sendAheadRemind(options = {}) {
       try {
         await bot.sendTextToUser(member.openId, text);
         sent.push({ name: member.name, position: rec.position });
+        markAheadReminded(remindedKey, member.openId);
       } catch (err) {
         skipped.push({ name: member.name, reason: `预告发送失败: ${err.message}` });
         console.error(`[预告] ${member.name} 发送失败:`, err.message);

@@ -15,7 +15,8 @@ const zklinkConfig = require('../zklink/config');
 // 定时任务（node-cron 6 段式 + Asia/Shanghai）：
 //   1. 次日提醒   DUTY_PREV_REMIND_SCHEDULE  (0 0 20 * * *,  D-1 20:00 私信明日队员)
 //   1.5 提前预告  DUTY_AHEAD_REMIND_SCHEDULES (默认 0 5 10/15/20 * * *,
-//                 D-7 与 D-3 每天各 3 次私信点名，2026-10-07 起替代原 D-7 单槽位 20:05)
+//                 D-7 与 D-3 每天各 3 个槽位，2026-10-07 起替代原 D-7 单槽位 20:05；
+//                 每人每天每域只发一条（v48f 去重），后续槽位只补首枪失败者/新入排班者)
 //   2. 当日询问   DUTY_ASK_SCHEDULE          (0 30 18 * * *, D 日 18:30 私信询问，开启监听窗口)
 //   2.5 中午提醒  DUTY_NOON_REMIND_SCHEDULE   (0 5 12 * * *,  D 日 12:05 私信点名+职责，
 //                 提前开启监听会话（下午即可打卡），v46 新增)
@@ -65,7 +66,9 @@ function startCronJobs() {
 
   tasks.push(scheduleTask(config.schedule.prevRemind, 'duty_prev_remind', '次日值日提醒', quietTaskRunners.duty_prev_remind));
   // 提前预告（2026-10-07 新口径）：D-7 与 D-3 各一个任务名，同一 runner 挂全部
-  // 槽位（默认 10:05/15:05/20:05 一天 3 次）；可重扫任务过静默闸门，积压按任务名合并
+  // 槽位（默认 10:05/15:05/20:05 一天 3 次）；可重扫任务过静默闸门，积压按任务名合并。
+  // v48f 当日去重：runner 内按「发送日|daysAhead」记已发账目，每人每天每域只收到一条，
+  // 第二/三槽位自动退化为失败兜底（首枪发送失败者/期间新入排班者才补发）
   for (const daysAhead of config.schedule.aheadRemind.days) {
     const name = `duty_ahead_remind_d${daysAhead}`;
     const runner = () => inquiry.sendAheadRemind({ daysAhead });

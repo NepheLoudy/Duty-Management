@@ -24,6 +24,8 @@ function emptyState() {
     obligations: [],    // { id, name, weekStart, reason, placed, placedAt, recordId, createdAt }
     absenceStreaks: {}, // name -> { count, lastDate }
     pendingLeaves: {},  // openId -> { recordId, dateStr, position, name, askedAt }（请假二次确认，2026-09-24）
+    aheadReminded: {},  // "发送日|daysAhead" -> { openId: true }（提前预告当日去重，v48f；
+                        // 只记发送成功者，失败者留给后续槽位补发；写入时清非今日键防膨胀）
   };
 }
 

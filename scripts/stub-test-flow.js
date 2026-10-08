@@ -78,7 +78,11 @@ require.cache[require.resolve('../src/feishu/bitable')] = {
 
 require.cache[require.resolve('../src/feishu/bot')] = {
   id: 'bot-stub', filename: 'bot-stub', loaded: true, exports: {
-    async sendTextToUser(openId, text) { memory.dmCalls.push({ openId, text }); return {}; },
+    // memory.dmFailFor 指定 openId 时模拟发送失败（v48f 去重测试：失败者不被标记、留待下枪补发）
+    async sendTextToUser(openId, text) {
+      if (memory.dmFailFor === openId) throw new Error('stub: 模拟发送失败');
+      memory.dmCalls.push({ openId, text }); return {};
+    },
     async sendTextToChat() { return {}; },
     async sendCardToChat(chatId, card) { memory.cards.push({ chatId, card }); return {}; },
   },
@@ -513,6 +517,35 @@ function check(desc, cond, detail = '') {
   check('D-3 预告：「三天后」文案 + 临期尽早请假提示',
     threeAhead.sent.every((s) => s.preview.includes('三天后') && s.preview.includes('尽早请假')),
     JSON.stringify(threeAhead.sent.map((s) => s.preview)));
+
+  // ---- 10.5 提前预告当日去重（2026-10-08 v48f：每人每天每域只发一条，三槽位=失败兜底） ----
+  // 用 D+5 独立域测，不碰上面 D-7/D-3 的夹具；A 注入发送失败 → 未标记，B 正常发出并标记；
+  // 第二枪（模拟 15:05 槽位）A 补发、B 去重跳过——证明「重复轰炸」收敛为「失败补发」
+  const d5Date = addDays(today, 5);
+  for (const r of await dutyTable.getRecordsByDate(d5Date)) {
+    if (!r.status) await dutyTable.setStatus(r.recordId, config.status.LEAVE);
+  }
+  await dutyTable.createDayRecords(d5Date, [
+    { member: roster.findByName('队员A'), position: '总负责' },
+    { member: roster.findByName('队员B'), position: '工位区' },
+  ]);
+  memory.dmFailFor = 'ou_test_a';
+  const dedup1 = await inquiry.sendAheadRemind({ daysAhead: 5 });
+  check('预告第一枪：B 发出、A 发送失败未被标记',
+    dedup1.sent.length === 1 && dedup1.sent[0].name === '队员B'
+      && dedup1.skipped.some((s) => s.name === '队员A' && s.reason.includes('发送失败')),
+    JSON.stringify({ sent: dedup1.sent, skipped: dedup1.skipped }));
+  check('预告第一枪：失败者不进今日已发账目',
+    Object.keys((state.load().aheadReminded || {})[`${today}|5`] || {}).length === 1,
+    JSON.stringify(state.load().aheadReminded));
+  memory.dmFailFor = null;
+  const dedup2 = await inquiry.sendAheadRemind({ daysAhead: 5 });
+  check('预告第二枪：A 失败补发、B 去重跳过不重发',
+    dedup2.sent.length === 1 && dedup2.sent[0].name === '队员A'
+      && dedup2.skipped.some((s) => s.name === '队员B' && s.reason.includes('今日已预告')),
+    JSON.stringify({ sent: dedup2.sent, skipped: dedup2.skipped }));
+  const d5DmCount = memory.dmCalls.filter((c) => c.text.includes('5 天后') && c.text.includes('值日预告')).length;
+  check('两枪合计：每人只收到一条预告（无重复轰炸）', d5DmCount === 2, `实际私信 ${d5DmCount} 条`);
 
   // ---- 11. 当日中午提醒（2026-10-07 v46 新增：18:30 询问前唯一私信触点，提前开启监听会话） ----
   // 前序用例（打卡/收口/请假）可能已把今日班次置状态，先全部置已请假腾场再造一条干净班次
