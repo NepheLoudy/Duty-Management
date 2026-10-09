@@ -1,5 +1,6 @@
 const fs = require('fs');
 const path = require('path');
+const crypto = require('crypto');
 
 // ============================================================
 // 晚间静默（播报时段限制）——与 approval-bot 等仓通用实现同款
@@ -204,7 +205,7 @@ async function gateTask(name, fireKey, run, label = name) {
   for (let i = items.length - 1; i >= 0; i--) {
     if (items[i].type === 'task' && items[i].name === name) items.splice(i, 1);
   }
-  items.push({ type: 'task', name, fireKey, queuedAt: new Date().toISOString() });
+  items.push({ id: crypto.randomUUID(), type: 'task', name, fireKey, queuedAt: new Date().toISOString() });
   writeStore(items, failures);
   scheduleFlushFromGate();
   console.log(`[晚间静默] ${label} 落入积压（共 ${items.length} 条），${nextQuietEnd().toLocaleString('zh-CN')} 统一补跑`);
@@ -217,7 +218,7 @@ function registerRetry(name, fireKey, err, label) {
   for (let i = items.length - 1; i >= 0; i--) {
     if (items[i].type === 'task' && items[i].name === name) items.splice(i, 1);
   }
-  items.push({ type: 'task', name, fireKey, queuedAt: new Date().toISOString(), lastError: String((err && err.message) || err) });
+  items.push({ id: crypto.randomUUID(), type: 'task', name, fireKey, queuedAt: new Date().toISOString(), lastError: String((err && err.message) || err) });
   writeStore(items, failures);
   const delay = inQuietHours() ? Math.max(nextQuietEnd().getTime() - Date.now(), 1000) : retryBaseMs();
   scheduleFlush(delay);
@@ -231,7 +232,7 @@ function registerRetry(name, fireKey, err, label) {
 function gatePayload(name, payload, label = name) {
   if (!inQuietHours()) return false;
   const items = loadBacklog();
-  items.push({ type: 'payload', name, payload, queuedAt: new Date().toISOString() });
+  items.push({ id: crypto.randomUUID(), type: 'payload', name, payload, queuedAt: new Date().toISOString() });
   saveBacklog(items);
   scheduleFlushFromGate();
   console.log(`[晚间静默] ${label} 载荷落盘积压（共 ${items.length} 条），${nextQuietEnd().toLocaleString('zh-CN')} 统一补发`);
@@ -252,6 +253,15 @@ async function runItem(item) {
 function describeItem(item) {
   if (item.type === 'task') return `${item.name}@${item.fireKey}`;
   return `${item.name}（${item.queuedAt}）`;
+}
+
+/**
+ * 积压条目身份键（2026-10-10 与 ticket-bot 同批对齐）：优先用 gate 入队时签发的
+ * 唯一 id——毫秒级 queuedAt 在同一毫秒入队的两条积压上碰撞，冲刷时同轮结算的
+ * 一对同毫秒条目会被 settledKeys 误吞。存量无 id 条目回落旧键保持兼容。
+ */
+function itemKey(item) {
+  return item.id || `${item.type}|${item.name}|${item.fireKey || ''}|${item.queuedAt}`;
 }
 
 function scheduleFlush(delayMs) {
@@ -285,20 +295,24 @@ async function runFlush() {
     }
     let anySuccess = false;
     for (let round = 0; round < FLUSH_ROUNDS; round++) {
-      const { items, failures } = readStore();
+      const { items } = readStore();
       if (items.length === 0) break;
 
       console.log(`[晚间静默] 开始冲刷积压 ${items.length} 条...`);
       const remaining = [];
       const exhausted = [];
+      const settledKeys = new Set(); // 本轮已成功或已转失败补报（不再保留）
+      const retryKeys = new Set();   // 本轮失败保留重试
       for (const item of items) {
         try {
           await runItem(item);
           anySuccess = true;
+          settledKeys.add(itemKey(item));
           console.log(`[晚间静默] 积压补跑完成: ${describeItem(item)}`);
         } catch (err) {
           item.attempts = (item.attempts || 0) + 1;
           if (item.attempts >= retryMaxAttempts()) {
+            settledKeys.add(itemKey(item));
             console.error(`[晚间静默] 积压补跑连续 ${item.attempts} 次失败，转失败补报: ${describeItem(item)} — ${err.message}`);
             exhausted.push({
               name: item.name,
@@ -307,19 +321,41 @@ async function runFlush() {
               failedAt: new Date().toISOString(),
             });
           } else {
+            retryKeys.add(itemKey(item));
             remaining.push(item);
             console.error(`[晚间静默] 积压补跑失败（第 ${item.attempts} 次，保留重试）: ${describeItem(item)} — ${err.message}`);
           }
         }
       }
-      writeStore(remaining, [...failures, ...exhausted]);
+
+      // 收尾保存前重读文件（2026-10-10 自 ticket-bot 同批移植竞态修复）：冲刷是
+      // 分钟级循环，期间 gateTask/gatePayload/registerRetry 可能往文件落了新积压——
+      // 直接 writeStore(remaining, ...) 会以「本轮快照-已结算」覆盖整个文件，把新
+      // 条目静默丢掉。以重读结果为基底，剔除本轮已结算（成功/转补报）的条目，保留
+      // 重试的条目用内存态（attempts 已自增）替换；failures 侧取重读值兜住并发追加
+      const fresh = readStore();
+      const merged = [];
+      const mergedKeys = new Set();
+      for (const it of fresh.items) {
+        const k = itemKey(it);
+        if (settledKeys.has(k) || mergedKeys.has(k)) continue;
+        mergedKeys.add(k);
+        merged.push(retryKeys.has(k) ? (remaining.find((r) => itemKey(r) === k) || it) : it);
+      }
+      // 本轮快照中的保留项若因并发写丢失（异常场景）也要兜回来
+      for (const r of remaining) {
+        const k = itemKey(r);
+        if (!mergedKeys.has(k)) { mergedKeys.add(k); merged.push(r); }
+      }
+      writeStore(merged, [...fresh.failures, ...exhausted]);
 
       if (remaining.length > 0) {
         const maxAttempts = Math.max(...remaining.map((i) => i.attempts || 0));
         scheduleFlush(inQuietHours() ? Math.max(nextQuietEnd().getTime() - Date.now(), 1000) : retryDelayMs(maxAttempts));
         return;
       }
-      // 全部成功；冲刷期间新落进的积压由下一轮立刻处理
+      if (merged.length > 0) continue; // 冲刷期间新落进的积压，下一轮立即处理
+      // 全部成功且无新积压
     }
     // 冲刷收尾：本轮有成功（= 网络活着的证据）且有待补报失败 → 尝试向管理员补报
     if (anySuccess) await maybeReportFailures();

@@ -108,7 +108,9 @@ async function runWeekly({ offset = 0, dryRun = false, trigger = 'cron' } = {}) 
 
   // ---- 云文档留档通道（未配置=skipped 不重试，本地 archive/ 已兜底）----
   if (done.archived !== true) {
-    if (config.feishuAppConfigured && config.archiveDocToken) {
+    // 2026-10-10 修复：原写 config.feishuAppConfigured（zklink config 只导出
+    // appConfigured）恒 undefined → 门控永远走 skipped，云文档留档从未执行
+    if (config.appConfigured && config.archiveDocToken) {
       try {
         const r = await feishuDoc.archiveToDoc(win, agg, records, { dataSource: config.dataSource });
         done.archived = true;
