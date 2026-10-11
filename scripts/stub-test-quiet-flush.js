@@ -17,6 +17,7 @@ const fs = require('fs');
 const ROOT = path.join(__dirname, '..');
 const BACKLOG_FILE = path.join(os.tmpdir(), `quiet-backlog-duty-test-${Date.now()}.json`);
 process.env.QUIET_BACKLOG_FILE = BACKLOG_FILE; // 必须在 require quietHours 前设置
+process.env.QUIET_HOURS_DISABLED = '1'; // 同上：禁静默窗口守卫（runFlush 窗口内会推迟冲刷直接 return，2026-10-10 移植时漏设致夜间跑批 1/8 假挂）
 process.env.QUIET_RETRY_BASE_MS = '50'; // 失败退避调小（桩测试不等真实分钟级）
 
 const quietHours = require(path.join(ROOT, 'src/utils/quietHours.js'));

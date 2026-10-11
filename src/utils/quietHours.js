@@ -57,7 +57,7 @@ const settings = {
 function clampHour(raw, fallback) {
   if (raw === undefined || raw === null || raw === '') return fallback;
   const s = String(raw).trim();
-  // 兼容「HH:mm」格式（wecom-attendance 同名键口径）与纯小时数字：
+  // 兼容「HH:mm」格式（历史 wecom 口径沿用，2026-10-12 wecom 废止后保留兼容）与纯小时数字：
   // 本模块粒度为整小时，分钟非 0 时取整点并 warn
   if (s.includes(':')) {
     const [h, m] = s.split(':').map((x) => Number(x));
