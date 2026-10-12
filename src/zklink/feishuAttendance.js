@@ -93,12 +93,57 @@ async function listGroups() {
   return groups;
 }
 
+// 用户组名单源（2026-10-12 新增正路）：考勤组建在飞书人事假勤域、标准考勤 API 永远不可见，
+// 曼波以「用户组」建考勤名单——GET /contact/v3/user_groups 按名定位 + /users 分页拉成员。
+// 返回 { members: [{userid,name}], groupId } ；组不存在/未配置返回 null。
+async function fetchUserGroupRoster() {
+  if (!config.userGroupName) return null;
+  const token = await getTenantAccessToken();
+  const gs = await fetch(`${OPEN_API}/contact/v3/user_groups?page_size=100`, {
+    signal: AbortSignal.timeout(20000),
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  const gj = await gs.json();
+  if (gj.code !== 0) { console.warn(`[打卡周报] 用户组列表拉取失败（${gj.code} ${gj.msg || ''}）`); return null; }
+  const g = ((gj.data && gj.data.items) || []).find((x) => x.name === config.userGroupName);
+  if (!g) {
+    console.warn(`[打卡周报] 用户组「${config.userGroupName}」未找到（现有：${((gj.data && gj.data.items) || []).map((x) => x.name).join('、') || '无'}）`);
+    return null;
+  }
+  const members = [];
+  let pageToken = '';
+  do {
+    const qs = new URLSearchParams({ page_size: '100' });
+    if (pageToken) qs.set('page_token', pageToken);
+    const r = await fetch(`${OPEN_API}/contact/v3/user_groups/${g.user_group_id}/users?${qs}`, {
+      signal: AbortSignal.timeout(20000),
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    const rj = await r.json();
+    if (rj.code !== 0) { console.warn(`[打卡周报] 用户组成员拉取失败（${rj.code} ${rj.msg || ''}）`); break; }
+    for (const m of ((rj.data && rj.data.items) || [])) {
+      const uid = m.member_id || m.user_id;
+      if (uid) members.push({ userid: String(uid), name: m.name || String(uid) });
+    }
+    pageToken = (rj.data && rj.data.page_token) || '';
+  } while (pageToken);
+  console.log(`[打卡周报] 用户组「${g.name}」名单 ${members.length} 人`);
+  return { members, groupId: g.user_group_id };
+}
+
 // 考勤组成员名单（「考勤组规则」口径，曼波 2026-10-08 定：组内每人都要进周报，未打卡=0 时长可见）
 // 组选择：ZKLINK_ATT_GROUP_NAME 按组名 > ZKLINK_ATT_GROUP_ID 按 id > 平台仅一个考勤组时自动取用。
-// 返回 { members: [{userid,name}] | null, reason }——null=取不到（调用方回落通讯录全员）
+// 2026-10-12 增补用户组回退层：考勤组建在人事假勤域、标准 API 永远不可见（实测 code=0 空），
+// 配置了 ZKLINK_USER_GROUP_NAME 时考勤组未匹配即走用户组（同形态返回，调用方无感）。
 async function resolveGroupMembers() {
+  const ugFallback = async (why) => {
+    if (!config.userGroupName) return { members: null, reason: why };
+    const ug = await fetchUserGroupRoster();
+    if (ug && ug.members.length) return { members: ug.members, group: { groupId: ug.groupId, groupName: config.userGroupName } };
+    return { members: null, reason: `${why}；用户组「${config.userGroupName}」也未取到` };
+  };
   if (!config.attGroupId && !config.attGroupName) {
-    return { members: null, reason: '未配置考勤组（ZKLINK_ATT_GROUP_NAME 填组名 / ZKLINK_ATT_GROUP_ID 填 id）' };
+    return ugFallback('未配置考勤组（ZKLINK_ATT_GROUP_NAME 填组名 / ZKLINK_ATT_GROUP_ID 填 id）');
   }
   const groups = await listGroups();
   let g = null;
@@ -106,7 +151,7 @@ async function resolveGroupMembers() {
   if (!g && config.attGroupName) g = groups.find((x) => x.groupName === config.attGroupName);
   if (!g && groups.length === 1) g = groups[0]; // 平台仅一个考勤组时自动取用
   if (!g) {
-    return { members: null, reason: `考勤组未匹配（配置：${config.attGroupName || config.attGroupId || '无'}；平台现有：${groups.map((x) => x.groupName).join('、') || '无'}）` };
+    return ugFallback(`考勤组未匹配（配置：${config.attGroupName || config.attGroupId || '无'}；平台现有：${groups.map((x) => x.groupName).join('、') || '无'}）`);
   }
   if (!g.memberIds.length) {
     return { members: null, reason: `考勤组「${g.groupName}」响应未携带成员列表（member_count=${g.memberCount}），需 attendance:rule:readonly 权限或接口形态变化` };
@@ -119,10 +164,15 @@ async function resolveGroupMembers() {
   };
 }
 
-// user_ids 解析：env 显式配置 > 通讯录全员（user_id 标识）
+// user_ids 解析：env 显式配置 > 用户组名单（正路） > 通讯录全员（user_id 标识）
 async function resolveUserIds() {
   const explicit = (config.attUserIds || '').split(',').map((s) => s.trim()).filter(Boolean);
   if (explicit.length) return { userIds: explicit, names: new Map() };
+  if (config.userGroupName) {
+    const ug = await fetchUserGroupRoster();
+    if (ug && ug.members.length) return { userIds: ug.members.map((m) => m.userid), names: new Map(ug.members.map((m) => [m.userid, m.name])) };
+    console.warn('[打卡周报] 用户组名单未取到，回落通讯录全员口径（拉取范围缩水风险）');
+  }
   const users = await listUsersWithUserId();
   if (!users.length) {
     const err = new Error('无法确定打卡人员：ZKLINK_ATT_USER_IDS 未配置且通讯录未取到 user_id（检查应用 contact:user.employee_id:readonly 权限）');
