@@ -83,6 +83,129 @@ async function appendDocBlocks(docToken, blocks) {
   return appended;
 }
 
+// ---- 多维表格归档（2026-10-12 曼波定：归档落点=wiki「打卡记录」bitable，按人每周一行） ----
+// 字段按 type 识别（改名无感）：11=人员 / 1=该周时长(文本) / 7=是否及格 / 2=第几周(数字)。
+// 人员列写 open_id（bitable User 字段不收 employee_id，1254066 UserFieldConvFail 实锤）；
+// 通讯录可见范围外的人拿不到 open_id——该行人员列留空但时长照写（warn 汇总，不阻塞归档）。
+const FIELD_TYPE = { USER: 11, TEXT: 1, NUMBER: 2, CHECKBOX: 7 };
+
+async function bitableCall(appToken, path, options = {}) {
+  const token = await getTenantAccessToken();
+  const res = await fetch(`${OPEN_API}/bitable/v1/apps/${appToken}/tables/${path}`, {
+    signal: AbortSignal.timeout(20000),
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+    ...options,
+  });
+  const j = await res.json();
+  if (j.code !== 0) throw feishuDocError(j.code, j.msg || `HTTP ${res.status}`);
+  return j.data || {};
+}
+
+// 表字段按 type 归位；人员列与时长列是归档的最小必需（缺了写了也没意义，直接报错）
+async function resolveArchiveFields(appToken, tableId) {
+  const data = await bitableCall(appToken, `${tableId}/fields?page_size=50`);
+  const items = data.items || [];
+  const first = (type) => items.find((f) => f.type === type);
+  const fields = {
+    user: first(FIELD_TYPE.USER),
+    duration: first(FIELD_TYPE.TEXT),
+    pass: first(FIELD_TYPE.CHECKBOX),
+    week: first(FIELD_TYPE.NUMBER),
+  };
+  if (!fields.user || !fields.duration) {
+    const err = new Error(`多维表格缺人员/时长列（按字段类型 ${FIELD_TYPE.USER}/${FIELD_TYPE.TEXT} 识别），现有类型：${items.map((f) => f.type).join(',')}——请检查「打卡记录」表结构`);
+    err.errcode = 'BAD_TABLE';
+    throw err;
+  }
+  return fields;
+}
+
+// 通讯录全量 user_id→open_id（GET /contact/v3/users 老端点全树遍历；find_by_department 新端点
+// 只见 13 人且部门接口 99992357——2026-10-12 实测）。用户 department_ids 反向发现子部门。
+async function fetchOpenIdMap() {
+  const token = await getTenantAccessToken();
+  const map = {};
+  const depts = ['0'];
+  const seen = new Set();
+  while (depts.length) {
+    const d = depts.shift();
+    let pageToken = '';
+    do {
+      const qs = new URLSearchParams({ department_id: d, user_id_type: 'user_id', page_size: '50' });
+      if (pageToken) qs.set('page_token', pageToken);
+      const res = await fetch(`${OPEN_API}/contact/v3/users?${qs}`, {
+        signal: AbortSignal.timeout(20000),
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const j = await res.json();
+      if (j.code !== 0) { console.warn(`[打卡留档] 通讯录部门 ${d} 拉取失败（${j.code} ${j.msg || ''}），跳过`); break; }
+      for (const p of (j.data && j.data.items) || []) {
+        if (p.user_id && p.open_id && !map[p.user_id]) map[p.user_id] = p.open_id;
+        for (const dd of (p.department_ids || [])) if (!seen.has(dd)) { seen.add(dd); depts.push(dd); }
+      }
+      pageToken = (j.data && j.data.page_token) || '';
+    } while (pageToken);
+  }
+  return map;
+}
+
+// 第几周：归档窗口周一（win.startWall）与学期第 1 周周一差值；未配置锚点返回 null
+function weekNumberOf(win) {
+  if (!config.week1Start) return null;
+  const [y, m, d] = config.week1Start.split('-').map(Number);
+  if (!y || !m || !d) return null;
+  const w1 = Date.UTC(y, m - 1, d, 16, 0, 0); // 上海 00:00 = UTC 前一日 16:00
+  return Math.round((win.startWall - w1) / (7 * 24 * 3600 * 1000)) + 1;
+}
+
+// 已有同周行则跳过（幂等：重试/手动重跑不重复写行）。
+// 注意 records 接口返回的 fields 键=字段名（非 field_id），按名匹配。
+async function bitableWeekExists(appToken, tableId, weekFieldName, weekNum) {
+  if (weekNum == null || !weekFieldName) return false;
+  const data = await bitableCall(appToken, `${tableId}/records?page_size=500`);
+  return ((data.items || []).some((r) => Number(r.fields && r.fields[weekFieldName]) === weekNum));
+}
+
+async function archiveToBitable(win, agg, appToken) {
+  const tableId = config.archiveTableId || ((await bitableCall(appToken, 'tables?page_size=20')).items || [])[0]?.table_id;
+  if (!tableId) {
+    const err = new Error('多维表格归档未定位到数据表：请配置 ZKLINK_ARCHIVE_TABLE_ID（表格链接 ?table= 参数值）');
+    err.errcode = 'NO_CONFIG';
+    throw err;
+  }
+  const fields = await resolveArchiveFields(appToken, tableId);
+  const weekNum = weekNumberOf(win);
+  if (await bitableWeekExists(appToken, tableId, fields.week && fields.week.field_name, weekNum)) {
+    console.log(`[打卡留档] 多维表格已有第 ${weekNum} 周行，跳过重复归档`);
+    return { appended: 0, tableId, skipped: true };
+  }
+
+  const openIdMap = await fetchOpenIdMap();
+  const rows = [];
+  const noOpenId = [];
+  for (const u of agg.users) {
+    const fieldsBody = {};
+    const oid = openIdMap[u.userid];
+    if (oid) fieldsBody[fields.user.field_name] = [{ id: oid }];
+    else noOpenId.push(u.name);
+    fieldsBody[fields.duration.field_name] = report.fmtDuration(u.totalMs);
+    if (fields.pass && config.passHours > 0) fieldsBody[fields.pass.field_name] = u.totalMs >= config.passHours * 3600 * 1000;
+    if (fields.week && weekNum != null) fieldsBody[fields.week.field_name] = weekNum;
+    rows.push({ fields: fieldsBody });
+  }
+  if (noOpenId.length) console.warn(`[打卡留档] ${noOpenId.length} 人不在通讯录可见范围、人员列留空：${noOpenId.join('、')}（名单源修复后可重置归档水位补全）`);
+
+  let appended = 0;
+  for (let i = 0; i < rows.length; i += 500) {
+    await bitableCall(appToken, `${tableId}/records/batch_create`, {
+      method: 'POST',
+      body: JSON.stringify({ records: rows.slice(i, i + 500) }),
+    });
+    appended += Math.min(500, rows.length - i);
+  }
+  return { appended, tableId };
+}
+
 // 本地留档（JSON 全量 + CSV 日明细）；失败仅 warn 不阻塞播报
 function archiveLocal(win, agg, records, extra = {}) {
   const result = { files: [], error: null };
@@ -131,12 +254,18 @@ function buildDocBlocks(win, agg, records, extra = {}) {
   return blocks;
 }
 
-// 追加到云文档末尾（自动解析 wiki 节点）；返回追加块数
+// 追加到云文档末尾（自动解析 wiki 节点）；返回追加块数。
+// objType=bitable 时走多维表格归档（2026-10-12 曼波定：归档落点=「打卡记录」bitable，
+// 按人每周一行——docx 分支从未成功落档过，bitable 是首个真归档形态）。
 async function archiveToDoc(win, agg, records, extra = {}) {
   const resolved = await resolveDocToken(config.archiveDocToken);
+  if (resolved.objType === 'bitable') {
+    const r = await archiveToBitable(win, agg, resolved.objToken);
+    return { appended: r.appended, objToken: resolved.objToken, objType: resolved.objType, tableId: r.tableId, skipped: !!r.skipped };
+  }
   const blocks = buildDocBlocks(win, agg, records, extra);
   const appended = await appendDocBlocks(resolved.objToken, blocks);
   return { appended, objToken: resolved.objToken, objType: resolved.objType };
 }
 
-module.exports = { archiveLocal, buildDocBlocks, archiveToDoc, resolveDocToken, textBlock, headingBlock, appendDocBlocks };
+module.exports = { archiveLocal, buildDocBlocks, archiveToDoc, archiveToBitable, resolveDocToken, resolveArchiveFields, weekNumberOf, textBlock, headingBlock, appendDocBlocks };

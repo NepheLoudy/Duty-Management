@@ -55,6 +55,13 @@ const config = {
   // 云文档留档（应用身份复用 duty-bot 的 APP_ID/APP_SECRET，见 src/config.js feishu 段）
   appConfigured: !!(process.env.APP_ID && process.env.APP_SECRET),
   archiveDocToken: process.env.ZKLINK_ARCHIVE_DOC_TOKEN || '',
+  // 多维表格归档（2026-10-12 曼波定：归档落点=wiki「打卡记录」bitable，按人每周一行——
+  // wiki 节点解析出 objType=bitable 时自动走表格分支，无需额外开关）
+  archiveTableId: process.env.ZKLINK_ARCHIVE_TABLE_ID || '',
+  // 学期第 1 周周一（YYYY-MM-DD）——归档「第几周」列起算锚点（2026-10-12 曼波定：当日为第 6 周 → 起点 2026-09-14）
+  week1Start: process.env.ZKLINK_WEEK1_START || '',
+  // 周时长及格线（小时，正数）——归档「是否及格」列判定；未配置/0=不写该列（口径待曼波，系统较复杂）
+  passHours: (() => { const n = Number(process.env.ZKLINK_PASS_HOURS); return Number.isFinite(n) && n > 0 ? n : 0; })(),
 
   stateFile: process.env.ZKLINK_STATE_FILE || path.join(DATA_DIR, 'zklink-state.json'),
   exportsDir: process.env.ZKLINK_EXPORTS_DIR || path.join(DATA_DIR, 'exports'),
