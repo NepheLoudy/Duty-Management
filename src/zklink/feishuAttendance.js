@@ -93,11 +93,54 @@ async function listGroups() {
   return groups;
 }
 
+// 部门全员（2026-10-12 名单补充源）：用户组成员接口只透出直接挂组的个人，组内「部门成员」
+//（梆队/贝习）不透出——按部门 ID（管理后台自定义形态，department_id_type=department_id）
+// 拉 users 分页 + 路径式 children 子部门递归，合并去重。openId 经 users/{user_id} 详情补齐。
+async function fetchDeptRoster(deptId, token, seenUserIds) {
+  const members = [];
+  const depts = [deptId];
+  const dseen = new Set(depts);
+  while (depts.length) {
+    const d = depts.shift();
+    let pt = '';
+    do {
+      const qs = new URLSearchParams({ department_id: d, department_id_type: 'department_id', user_id_type: 'user_id', page_size: '50' });
+      if (pt) qs.set('page_token', pt);
+      const r = await fetch(`${OPEN_API}/contact/v3/users?${qs}`, {
+        signal: AbortSignal.timeout(20000),
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const j = await r.json();
+      if (j.code !== 0) { console.warn(`[打卡周报] 部门 ${d} 成员拉取失败（${j.code} ${j.msg || ''}）`); break; }
+      for (const p of ((j.data && j.data.items) || [])) {
+        if (!p.user_id || seenUserIds.has(p.user_id)) continue;
+        seenUserIds.add(p.user_id);
+        members.push({ userid: String(p.user_id), name: p.name || String(p.user_id), openId: p.open_id || '' });
+        for (const dd of (p.department_ids || [])) if (!dseen.has(dd)) { dseen.add(dd); depts.push(dd); }
+      }
+      pt = (j.data && j.data.page_token) || '';
+    } while (pt);
+    // 子部门递归（路径式 children；query 形态是 99992380 幻影参数）
+    try {
+      const cr = await fetch(`${OPEN_API}/contact/v3/departments/${encodeURIComponent(d)}/children?department_id_type=department_id&user_id_type=user_id&page_size=50`, {
+        signal: AbortSignal.timeout(20000),
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const cj = await cr.json();
+      for (const cd of ((cj.data && cj.data.items) || [])) {
+        if (cd.department_id && !dseen.has(cd.department_id)) { dseen.add(cd.department_id); depts.push(cd.department_id); }
+      }
+    } catch (e) { /* 子部门发现失败不阻塞：用户 department_ids 反向发现仍可补充 */ }
+  }
+  return members;
+}
+
 // 用户组名单源（2026-10-12 新增正路）：考勤组建在飞书人事假勤域、标准考勤 API 永远不可见，
 // 曼波以「用户组」建考勤名单——成员走 GET /contact/v3/group/{id}/member/simplelist
 //（/user_groups/{id}/users 是 404 幻影端点，实测；响应键=data.memberlist 非 items）。
 // member_id_type=user_id（流水查询 employee_id 口径同形）；simplelist 不带姓名，逐个查
 // users/{user_id} 补 name + open_id（open_id=bitable 人员字段必需，随名单流转到归档）。
+// 组内「部门成员」（梆队/贝习等）接口不透出——ZKLINK_ROSTER_DEPT_IDS 指定部门 ID 额外拉全员合并。
 // 返回 { members: [{userid,name,openId}], groupId } ；组不存在/未配置返回 null。
 async function fetchUserGroupRoster() {
   if (!config.userGroupName) return null;
@@ -147,6 +190,15 @@ async function fetchUserGroupRoster() {
         members.push({ userid: uid, name: uid, openId: '' });
       }
     }));
+  }
+  // 部门名单补充（组内部门成员 API 不透出，按 ZKLINK_ROSTER_DEPT_IDS 拉全员合并去重）
+  if (config.rosterDeptIds.length) {
+    const seenIds = new Set(members.map((m) => m.userid));
+    for (const deptId of config.rosterDeptIds) {
+      const dm = await fetchDeptRoster(deptId, token, seenIds);
+      members.push(...dm);
+      console.log(`[打卡周报] 部门 ${deptId} 并入名单 ${dm.length} 人（去重后总 ${members.length}）`);
+    }
   }
   console.log(`[打卡周报] 用户组「${g.name}」名单 ${members.length} 人（缺 open_id ${members.filter((m) => !m.openId).length} 人）`);
   return { members, groupId: g.user_group_id };

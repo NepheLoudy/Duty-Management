@@ -35,9 +35,13 @@ const config = {
   // 组名直觉好填；ID 亦可。两者都空且平台只有一个考勤组时自动取用。
   attGroupName: process.env.ZKLINK_ATT_GROUP_NAME || '',
   // 用户组名单源（2026-10-12 曼波拍板正路）：考勤组建在飞书人事假勤域、标准考勤 API 永远不可见
-  //（groups/shifts/按人查 code=0 空实锤）；曼波以「用户组」建考勤名单（user_groups API 可读），
+  //（groups/shifts/按人查 code=0 空实锤）——曼波以「用户组」建考勤名单（user_groups API 可读），
   // 填组名即启用；优先级=ATT_USER_IDS 显式 > 考勤组(保留,万一迁回标准考勤) > 用户组 > 通讯录。
   userGroupName: process.env.ZKLINK_USER_GROUP_NAME || '',
+  // 部门名单补充（2026-10-12）：用户组成员接口只返回直接挂组的个人，组内「部门成员」（梆队/贝习，
+  // 界面展开计入成员数）API 不透出——按部门 ID 列表（管理后台部门详情的「部门 ID」，逗号分隔）
+  // 额外拉全员并入名单，与直接成员去重。
+  rosterDeptIds: (process.env.ZKLINK_ROSTER_DEPT_IDS || '').split(',').map((s) => s.trim()).filter(Boolean),
 
   zklinkBaseUrl: (process.env.ZKLINK_BASE_URL || 'https://zklink.zktecoiot.com').replace(/\/+$/, ''),
   zklinkUsername: process.env.ZKLINK_USERNAME || '',
