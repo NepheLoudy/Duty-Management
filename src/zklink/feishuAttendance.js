@@ -94,8 +94,11 @@ async function listGroups() {
 }
 
 // 用户组名单源（2026-10-12 新增正路）：考勤组建在飞书人事假勤域、标准考勤 API 永远不可见，
-// 曼波以「用户组」建考勤名单——GET /contact/v3/user_groups 按名定位 + /users 分页拉成员。
-// 返回 { members: [{userid,name}], groupId } ；组不存在/未配置返回 null。
+// 曼波以「用户组」建考勤名单——成员走 GET /contact/v3/group/{id}/member/simplelist
+//（/user_groups/{id}/users 是 404 幻影端点，实测；响应键=data.memberlist 非 items）。
+// member_id_type=user_id（流水查询 employee_id 口径同形）；simplelist 不带姓名，逐个查
+// users/{user_id} 补 name + open_id（open_id=bitable 人员字段必需，随名单流转到归档）。
+// 返回 { members: [{userid,name,openId}], groupId } ；组不存在/未配置返回 null。
 async function fetchUserGroupRoster() {
   if (!config.userGroupName) return null;
   const token = await getTenantAccessToken();
@@ -110,24 +113,42 @@ async function fetchUserGroupRoster() {
     console.warn(`[打卡周报] 用户组「${config.userGroupName}」未找到（现有：${((gj.data && gj.data.items) || []).map((x) => x.name).join('、') || '无'}）`);
     return null;
   }
-  const members = [];
+  const ids = [];
   let pageToken = '';
   do {
-    const qs = new URLSearchParams({ page_size: '100' });
+    const qs = new URLSearchParams({ page_size: '100', member_id_type: 'user_id' });
     if (pageToken) qs.set('page_token', pageToken);
-    const r = await fetch(`${OPEN_API}/contact/v3/user_groups/${g.user_group_id}/users?${qs}`, {
+    const r = await fetch(`${OPEN_API}/contact/v3/group/${g.user_group_id}/member/simplelist?${qs}`, {
       signal: AbortSignal.timeout(20000),
       headers: { Authorization: `Bearer ${token}` },
     });
     const rj = await r.json();
     if (rj.code !== 0) { console.warn(`[打卡周报] 用户组成员拉取失败（${rj.code} ${rj.msg || ''}）`); break; }
-    for (const m of ((rj.data && rj.data.items) || [])) {
-      const uid = m.member_id || m.user_id;
-      if (uid) members.push({ userid: String(uid), name: m.name || String(uid) });
+    for (const m of (rj.data && rj.data.memberlist) || []) {
+      if (m.member_id) ids.push(String(m.member_id));
     }
-    pageToken = (rj.data && rj.data.page_token) || '';
+    pageToken = (rj.data && rj.data.has_more) ? (rj.data.page_token || '') : '';
   } while (pageToken);
-  console.log(`[打卡周报] 用户组「${g.name}」名单 ${members.length} 人`);
+  // 姓名 + open_id 补齐：simplelist 不带，逐个查 users/{user_id}（小并发限 5，名单 ≤ 百人级）
+  const members = [];
+  for (let i = 0; i < ids.length; i += 5) {
+    await Promise.all(ids.slice(i, i + 5).map(async (uid) => {
+      try {
+        const r = await fetch(`${OPEN_API}/contact/v3/users/${encodeURIComponent(uid)}?user_id_type=user_id`, {
+          signal: AbortSignal.timeout(20000),
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        const j = await r.json();
+        const u = (j.data && j.data.user) || {};
+        members.push(j.code === 0
+          ? { userid: uid, name: u.name || uid, openId: u.open_id || '' }
+          : { userid: uid, name: uid, openId: '' });
+      } catch (e) {
+        members.push({ userid: uid, name: uid, openId: '' });
+      }
+    }));
+  }
+  console.log(`[打卡周报] 用户组「${g.name}」名单 ${members.length} 人（缺 open_id ${members.filter((m) => !m.openId).length} 人）`);
   return { members, groupId: g.user_group_id };
 }
 

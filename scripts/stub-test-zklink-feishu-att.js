@@ -175,18 +175,21 @@ function check(name, cond, extra = '') {
       { user_group_id: 'ug_kaoqin', name: '考勤组', member_count: 2 },
       { user_group_id: 'ug_other', name: '管理组', member_count: 8 },
     ] } }) };
-    if (u.includes('/contact/v3/user_groups/ug_kaoqin/users')) return { json: async () => ({ code: 0, data: { items: [
-      { member_id: 'u_ug1', name: '王五' },
-      { member_id: 'u_ug2', name: '赵六' },
-    ] } }) };
+    if (u.includes('/contact/v3/group/ug_kaoqin/member/simplelist')) return { json: async () => ({ code: 0, data: { memberlist: [
+      { member_id: 'u_ug1', member_type: 'user' },
+      { member_id: 'u_ug2', member_type: 'user' },
+    ], has_more: false } }) };
+    if (u.includes('/contact/v3/users/u_ug1')) return { json: async () => ({ code: 0, data: { user: { name: '王五', open_id: 'ou_ug1' } } }) };
+    if (u.includes('/contact/v3/users/u_ug2')) return { json: async () => ({ code: 0, data: { user: { name: '赵六', open_id: 'ou_ug2' } } }) };
     if (u.includes('/contact/v3/users')) return { json: async () => ({ code: 0, data: { items: [] } }) };
     return { json: async () => ({ code: 1, msg: `unexpected ${u}` }) };
   };
   const gm7 = await att7.resolveGroupMembers();
   check('考勤组空 → 用户组回退出名单', gm7.members && gm7.members.length === 2 && gm7.group.groupId === 'ug_kaoqin', JSON.stringify(gm7));
   check('用户组成员带姓名', gm7.members[0].name === '王五', JSON.stringify(gm7.members[0]));
+  check('成员带 open_id（bitable 人员字段必需）', gm7.members[0].openId === 'ou_ug1', JSON.stringify(gm7.members[0]));
   const ru7 = await att7.resolveUserIds();
-  check('resolveUserIds 优先用户组（拉流水名单=组员）', ru7.userIds.join(',') === 'u_ug1,u_ug2' && ru7.names.get('u_ug1') === '王五', JSON.stringify(ru7));
+  check('resolveUserIds 优先用户组（拉流水名单=组员 user_id 形态）', ru7.userIds.join(',') === 'u_ug1,u_ug2' && ru7.names.get('u_ug1') === '王五', JSON.stringify(ru7));
 
   console.log('\n== 8. 用户组未命中 → 回落通讯录（行为同旧版） ==');
   process.env.ZKLINK_USER_GROUP_NAME = '不存在的组';
@@ -198,6 +201,7 @@ function check(name, cond, extra = '') {
     if (u.includes('tenant_access_token')) return { json: async () => ({ code: 0, tenant_access_token: 't-8', expire: 7200 }) };
     if (u.includes('attendance/v1/groups')) return { json: async () => ({ code: 0, data: { items: [] } }) };
     if (u.includes('/contact/v3/user_groups?')) return { json: async () => ({ code: 0, data: { items: [] } }) };
+    if (u.includes('/contact/v3/group/') && u.includes('member/simplelist')) return { json: async () => ({ code: 0, data: { memberlist: [], has_more: false } }) };
     if (u.includes('/contact/v3/users')) return { json: async () => ({ code: 0, data: { items: [
       { user_id: 'u_fb1', name: '兜底一', department_ids: [] },
     ] } }) };

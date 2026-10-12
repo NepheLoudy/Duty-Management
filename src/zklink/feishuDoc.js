@@ -180,12 +180,12 @@ async function archiveToBitable(win, agg, appToken) {
     return { appended: 0, tableId, skipped: true };
   }
 
-  const openIdMap = await fetchOpenIdMap();
+  const openIdMap = await fetchOpenIdMap(); // 名单不带 openId 时的兜底映射
   const rows = [];
   const noOpenId = [];
   for (const u of agg.users) {
     const fieldsBody = {};
-    const oid = openIdMap[u.userid];
+    const oid = u.openId || openIdMap[u.userid];
     if (oid) fieldsBody[fields.user.field_name] = [{ id: oid }];
     else noOpenId.push(u.name);
     fieldsBody[fields.duration.field_name] = report.fmtDuration(u.totalMs);
@@ -246,7 +246,8 @@ function buildDocBlocks(win, agg, records, extra = {}) {
   }
   blocks.push(headingBlock(3, `打卡明细（全部 ${records.length} 条记录）`));
   for (const r of records) {
-    const name = (agg.userNames && agg.userNames.get(r.userid)) || r._name || r.userid;
+    const mi = (agg.userNames && agg.userNames.get(r.userid)) || null; // memberMap：{name, openId}
+    const name = (mi && mi.name) || r._name || r.userid;
     const meta = [r.checkin_type, r.exception_type && `异常:${r.exception_type}`, r.groupname].filter(Boolean).join(' · ');
     blocks.push(textBlock(`• ${report.fmtTime(r.checkin_time * 1000)} ${name}（${r.userid}）${meta ? ` — ${meta}` : ''}`));
   }

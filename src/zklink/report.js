@@ -110,7 +110,8 @@ function nextSendTime(nowMs, sendDow, hour, minute) {
  * （打卡天数 0），便于一眼看到缺勤。
  */
 function aggregateDuration(records, members) {
-  const nameMap = new Map((members || []).map((m) => [m.userid, m.name || m.userid]));
+  // memberMap 保留 openId（bitable 人员字段归档用，2026-10-12 名单源带出）
+  const memberMap = new Map((members || []).map((m) => [m.userid, m]));
   const byUser = new Map();
   const sorted = [...(records || [])].sort((a, b) => a.checkin_time - b.checkin_time);
 
@@ -118,10 +119,12 @@ function aggregateDuration(records, members) {
     const t = r.checkin_time * 1000;
     const day = fmtDay(toWall(t));
     if (!byUser.has(r.userid)) {
+      const m = memberMap.get(r.userid);
       byUser.set(r.userid, {
         userid: r.userid,
-        name: nameMap.get(r.userid) || r._name || r.userid,
-        known: nameMap.has(r.userid),
+        name: (m && m.name) || r._name || r.userid,
+        openId: (m && m.openId) || '',
+        known: memberMap.has(r.userid),
         days: new Map(), // dayKey -> {first, last, count}
         punches: 0,
       });
@@ -136,7 +139,7 @@ function aggregateDuration(records, members) {
   // 名单内整周无记录的人也列出来（打卡天数 0），便于负责人一眼看到缺勤
   for (const m of members || []) {
     if (!byUser.has(m.userid)) {
-      byUser.set(m.userid, { userid: m.userid, name: m.name || m.userid, known: true, days: new Map(), punches: 0 });
+      byUser.set(m.userid, { userid: m.userid, name: m.name || m.userid, openId: m.openId || '', known: true, days: new Map(), punches: 0 });
     }
   }
 
@@ -155,6 +158,7 @@ function aggregateDuration(records, members) {
     return {
       userid: u.userid,
       name: u.name,
+      openId: u.openId || '',
       known: u.known,
       punchDays: days.length,
       punches: u.punches,
@@ -175,7 +179,7 @@ function aggregateDuration(records, members) {
   // 日明细平铺（CSV 渲染复用）
   const dayRows = users.flatMap((u) => u.days.map((d) => ({ name: u.name, userid: u.userid, ...d })));
 
-  return { users, totals, dayRows, recordCount: sorted.length, rawRecords: sorted, userNames: nameMap };
+  return { users, totals, dayRows, recordCount: sorted.length, rawRecords: sorted, userNames: memberMap };
 }
 
 // 卡片 markdown 段（飞书卡片 markdown tag 逐人一行，同 duty/wecom 卡片口径）
