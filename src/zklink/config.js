@@ -34,8 +34,8 @@ const config = {
   // 考勤组（「考勤组规则」口径，曼波 2026-10-08 定：周报名单以考勤组成员为准，未打卡=0 时长可见）
   // 组名直觉好填；ID 亦可。两者都空且平台只有一个考勤组时自动取用。
   attGroupName: process.env.ZKLINK_ATT_GROUP_NAME || '',
-  // 用户组名单源（2026-10-12 新增正路）：考勤组建在飞书人事假勤域、标准考勤 API 永远不可见
-  //（groups/shifts/按人查 code=0 空实锤）——曼波以「用户组」建考勤名单（user_groups API 可读），
+  // 用户组名单源（2026-10-12 曼波拍板正路）：考勤组建在飞书人事假勤域、标准考勤 API 永远不可见
+  //（groups/shifts/按人查 code=0 空实锤）；曼波以「用户组」建考勤名单（user_groups API 可读），
   // 填组名即启用；优先级=ATT_USER_IDS 显式 > 考勤组(保留,万一迁回标准考勤) > 用户组 > 通讯录。
   userGroupName: process.env.ZKLINK_USER_GROUP_NAME || '',
 
