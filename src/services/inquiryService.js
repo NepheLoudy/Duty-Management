@@ -358,7 +358,7 @@ async function handleImage({ openId, imageKey, imageKeys, messageId }) {
 }
 
 /**
- * D 日 21:00 临门提醒（收口前 1 小时）：私信当日仍未完结队员（可重扫任务，过静默闸门）。
+ * D 日 23:00 临门提醒：私信当日仍未完结队员（可重扫任务，过静默闸门）。
  * 2026-09-16 新增：18:30 询问后到收口之间无任何再触达，成员忘了就是「未做完」。
  * @returns {{date, sent: number, skipped: Array, preview: Array}}
  */

@@ -15,8 +15,8 @@
   （open_id 直取组织架构，无需逐人绑定；「绑定 姓名」降级为人工纠错兜底，admin 标记按姓名保留）；
   白名单（`config/whitelist.json`）仍为排除名单；定制窗口：`GET /api/duty/roster`、
   `GET|POST /api/duty/whitelist`（规则见顶层 AGENTS「机器人后端定制窗口」）；
-  **白名单/名册的权威在 NAS 侧文件**（运维台直写），本地 `config/*.json` 只是种子——
-  push.js 上传前会自动备份 NAS 现网版本，本地条目数少于现网时跳过上传（`PUSH_FORCE_PRIVATE=1` 强制覆盖），见顶层 AGENTS「运行时数据保护」；
+  **白名单/名册的权威在部署目标侧文件**（运维台直写，现=小电脑），本地 `config/*.json` 只是种子——
+  push.js 上传前会自动备份部署目标现网版本，本地条目数少于现网时跳过上传（`PUSH_FORCE_PRIVATE=1` 强制覆盖），见顶层 AGENTS「运行时数据保护」；
 - **值日域管辖策略（权限管辖范畴/生效范畴）以本项目为单一事实来源**：`.env` 的
   `DUTY_GROUP_CHAT_IDS` 配置管辖群，经 `GET /api/duty/policy` 下发给 hub——看板触发词、
   基础指令关闭、未命中引导语、p2p 指令清单都随策略下发（关键词回答已全群统一，
@@ -213,7 +213,7 @@
 
 - **`config/members.json`（真实名册，含 open_id）与 `config/whitelist.json`（人名白名单）
   已在 .gitignore，永不进 git**；仓库只保留 `*.example.json` 模板；
-- push.js 打包与 git 之外，会显式把这两个文件 SFTP 到 NAS（git 路径部署仓库里没有它们）；
+- push.js 打包与 git 之外，会显式把这两个文件 SFTP 到部署目标（git 路径部署仓库里没有它们）；
 - 代码、文档、注释、测试一律不出现真实姓名/open_id/群凭据（用「管理员/队员A」代称）；
 - 运行状态 `.duty-state.json`、积压 `.quiet-backlog.json` 同样不入 git。
 
@@ -235,11 +235,11 @@ npm run table:create    # 自动新建 Bitable+排班表（打印 app_token/tabl
 
 严格照 `.agents/skills/qianli-deploy/SKILL.md`：
 
-1. 唯一入口 `npm run push "提交说明"`（提交 → 推送 → NAS → pm2 重启）；
+1. 唯一入口 `npm run push "提交说明"`（提交 → 推送 → 部署目标 → pm2 重启）；
 2. push.js 与 approval-bot 同构，四处差异：`TAR_NAME=duty-bot-deploy.tar.gz`、
    `REMOTE_DIR=/c/qianli/opt/duty-bot`、`GIT_REMOTE=https://github.com/NepheLoudy/Duty-Management.git`（建仓前
    git push 失败会自动走 SFTP 直传）、`PM2_NAME=duty-bot`（首启后 `pm2 save`）；
-3. `.env` 与真实名册/白名单每次 push 显式 SFTP 到 NAS（不进 git）；
+3. `.env` 与真实名册/白名单每次 push 显式 SFTP 到部署目标（不进 git）；
 4. 上线验证：pm2 online → `/api/health` 200 → `test-generate` dryRun 预览 → `test-remind`/
    `test-ask` dryRun 预览（手动触发不受静默限制）。
 

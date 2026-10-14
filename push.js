@@ -242,7 +242,7 @@ async function deployCode(sftp, plan) {
 // npm install
 function npmInstall(sftp, plan) {
   console.log('\n安装依赖...');
-  exec('export PATH=/c/tools/node-v22.10.0-win-x64:/c/Users/0d00/bin:/mingw64/bin:/usr/local/bin:/usr/bin:/bin:/mingw64/bin:/usr/bin:/c/Users/0d00/bin:/c/Windows/system32:/c/Windows:/c/Windows/System32/Wbem:/c/Windows/System32/WindowsPowerShell/v1.0:/c/Windows/System32/OpenSSH:/d/pcsuite:/c/MinGW/bin:/c/Program Files/dotnet:/c/Program Files/nodejs:/cmd:/c/Users/0d00/AppData/Local/Programs/Python/Python312/Scripts:/c/Users/0d00/AppData/Local/Programs/Python/Python312:/c/Users/0d00/AppData/Local/Programs/Python/Launcher:/c/Users/0d00/AppData/Local/Microsoft/WindowsApps:/c/Users/0d00/AppData/Local/Programs/Microsoft VS Code/bin:/c/Users/0d00/AppData/Roaming/npm:/c/Users/0d00/AppData/Local/Programs/ZCode/resources/tools/ripgrep:/c/Users/0d00/AppData/Local/Programs/ZCode/resources/tools/ugrep:/c/Program Files/nodejs:/usr/bin/vendor_perl:/usr/bin/core_perl; cd ' + REMOTE_DIR + ' && npm install --omit=dev', () => uploadEnv(sftp, plan));
+  exec('export PATH=/c/Program Files/nodejs:/c/tools/node-v22.10.0-win-x64:/mingw64/bin:/usr/local/bin:/usr/bin:/bin; cd ' + REMOTE_DIR + ' && npm install --omit=dev', () => uploadEnv(sftp, plan));
 }
 
 // ============ [3/4] 上传 .env 与私有配置 ============

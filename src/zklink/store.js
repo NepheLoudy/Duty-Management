@@ -23,8 +23,11 @@ function loadState() {
 }
 
 function saveState(state) {
+  // 原子写（tmp+rename）：写一半被杀会产生损坏 JSON 且 loadState 无兜底，周报链会持续失败（v154 审查修复）
+  const tmp = config.stateFile + '.tmp';
   ensureDir(config.stateFile);
-  fs.writeFileSync(config.stateFile, JSON.stringify(state, null, 2) + '\n');
+  fs.writeFileSync(tmp, JSON.stringify(state, null, 2) + '\n');
+  fs.renameSync(tmp, config.stateFile);
   return state;
 }
 
