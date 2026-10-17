@@ -8,12 +8,14 @@
 // 播报窗口：以「发送日」为锚——窗口 = 发送日 00:00 往前整 7 天。
 // 默认每周一 09:30 发，窗口即上一周一 00:00 ~ 本周一 00:00（上一完整周）。
 //
-// 时长口径（本仓核心；2026-10-07 定"每周统计打卡时长"，2026-10-15 曼波改定配对规则）：
-//   按人按上海挂钟日聚合，当日打卡按时间排序后顺序两两配对（第1→第2、第3→第4…），
-//   每段 = 段末卡 − 段首卡，周时长 = Σ各段。每张卡最多当一次配对节点——
-//   奇数张时最后一张落单直接不计（leftover 标记）；跨天相邻卡不配对（挂钟日切断）。
-//   恰 1 条=孤条（无任何配对，计 0），0 条=缺勤不在日明细出现。
-//   平台侧考勤组/班次只影响 ZKLink 自己的报表口径，不影响本口径。
+// 时长口径（本仓核心；2026-10-07 定"每周统计打卡时长"，2026-10-18 曼波定平台口径）：
+//   - feishu 档（生产）：以飞书考勤「打卡结果」user_tasks 的上下班配对为准——
+//     平台按班次把上班卡/下班卡配成班段，工作日边界 06:00（06:00–次日 05:59），
+//     跨天班次计入起始日；同一天多个班段逐段累加；单边卡标缺卡、不计时长
+//     （NoNeedCheck 单边卡不算缺卡）。aggregateSessions 消费该口径。
+//   - import/http 档：保留旧流水两两配对（第1→第2、第3→第4…）——按上海挂钟日切断、
+//     奇数末张落单不计、恰 1 条孤条计 0。aggregateDuration 消费该口径。
+//   两种口径由 agg.mode 区分（'sessions' / 'pairs'），卡片/CSV/云文档据此分支。
 // ============================================================
 
 const SHANGHAI_OFFSET_MS = 8 * 3600 * 1000;
@@ -187,14 +189,141 @@ function aggregateDuration(records, members) {
   // 日明细平铺（CSV 渲染复用）
   const dayRows = users.flatMap((u) => u.days.map((d) => ({ name: u.name, userid: u.userid, ...d })));
 
-  return { users, totals, dayRows, recordCount: sorted.length, rawRecords: sorted, userNames: memberMap };
+  return { mode: 'pairs', users, totals, dayRows, recordCount: sorted.length, rawRecords: sorted, userNames: memberMap };
+}
+
+/**
+ * 平台班段聚合（飞书 user_tasks 口径，2026-10-18 曼波定）：
+ * 平台已按班次配对上下班卡（工作日 06:00–次日 05:59，跨天班次计入起始日），
+ * 本函数只做按人/按平台 day 的累加，不再自行配对；同一天多个班段逐段相加。
+ * 单边卡（missing=true）标缺卡、不计时长；NoNeedCheck 单边卡由抓取侧标 missing=false。
+ * @param {Array<{userid, _name, day, checkin_time, checkout_time, durationMs, complete, missing, crossDay}>} sessions
+ * @param {Array<{userid, name, openId?}>} members
+ */
+function aggregateSessions(sessions, members) {
+  const memberMap = new Map((members || []).map((m) => [m.userid, m]));
+  const byUser = new Map();
+
+  for (const s of sessions || []) {
+    if (!s || !s.userid) continue;
+    const m = memberMap.get(s.userid);
+    if (!byUser.has(s.userid)) {
+      byUser.set(s.userid, {
+        userid: s.userid,
+        name: (m && m.name) || s._name || s.userid,
+        openId: (m && m.openId) || '',
+        known: memberMap.has(s.userid),
+        days: new Map(),
+        punches: 0,
+        sessions: 0,
+        completeSessions: 0,
+        missingSessions: 0,
+      });
+    }
+    const u = byUser.get(s.userid);
+    const day = String(s.day || '');
+    const times = [s.checkin_time, s.checkout_time]
+      .filter((t) => t != null && Number.isFinite(Number(t)))
+      .map((t) => Number(t));
+    if (times.length === 0) continue; // 无打卡记录的排班段不进入日明细
+    if (!u.days.has(day)) {
+      u.days.set(day, { first: null, last: null, count: 0, durationMs: 0, sessions: 0, completeSessions: 0, missingSessions: 0 });
+    }
+    const d = u.days.get(day);
+    const ms = times.map((t) => t * 1000);
+    u.punches += times.length;
+    u.sessions += 1;
+    d.count += times.length;
+    d.sessions += 1;
+    if (d.first == null || Math.min(...ms) < d.first) d.first = Math.min(...ms);
+    if (d.last == null || Math.max(...ms) > d.last) d.last = Math.max(...ms);
+    if (s.complete) {
+      u.completeSessions += 1;
+      d.completeSessions += 1;
+      d.durationMs += Math.max(0, Number(s.durationMs) || 0);
+    } else if (s.missing !== false) {
+      u.missingSessions += 1;
+      d.missingSessions += 1;
+    }
+  }
+
+  // 名单内整周无记录的人也列出（0 天 / 0 时长），便于一眼看到缺勤
+  for (const m of members || []) {
+    if (!byUser.has(m.userid)) {
+      byUser.set(m.userid, {
+        userid: m.userid,
+        name: m.name || m.userid,
+        openId: m.openId || '',
+        known: true,
+        days: new Map(),
+        punches: 0,
+        sessions: 0,
+        completeSessions: 0,
+        missingSessions: 0,
+      });
+    }
+  }
+
+  const users = [...byUser.values()].map((u) => {
+    const days = [...u.days.entries()]
+      .sort((a, b) => (a[0] < b[0] ? -1 : 1))
+      .map(([day, d]) => ({
+        day,
+        first: d.first,
+        last: d.last,
+        count: d.count,
+        durationMs: d.durationMs,
+        sessions: d.sessions,
+        completeSessions: d.completeSessions,
+        missingSessions: d.missingSessions,
+        lonely: false,
+        leftover: 0,
+      }));
+    const totalMs = days.reduce((sum, d) => sum + d.durationMs, 0);
+    return {
+      userid: u.userid,
+      name: u.name,
+      openId: u.openId || '',
+      known: u.known,
+      punchDays: days.length,
+      punches: u.punches,
+      sessions: u.sessions,
+      completeSessions: u.completeSessions,
+      missingSessions: u.missingSessions,
+      lonelyDays: 0,
+      leftoverCards: 0,
+      totalMs,
+      days,
+    };
+  });
+  users.sort((a, b) => (a.name > b.name ? 1 : a.name < b.name ? -1 : 0));
+
+  const totals = {
+    mode: 'sessions',
+    punches: users.reduce((n, u) => n + u.punches, 0),
+    users: users.length,
+    punchUsers: users.filter((u) => u.punches > 0).length,
+    sessions: users.reduce((n, u) => n + u.sessions, 0),
+    completeSessions: users.reduce((n, u) => n + u.completeSessions, 0),
+    missingSessions: users.reduce((n, u) => n + u.missingSessions, 0),
+    lonelyDays: 0,
+    leftoverCards: 0,
+    totalMs: users.reduce((n, u) => n + u.totalMs, 0),
+  };
+  const dayRows = users.flatMap((u) => u.days.map((d) => ({ name: u.name, userid: u.userid, ...d })));
+  return { mode: 'sessions', users, totals, dayRows, recordCount: (sessions || []).length, rawRecords: sessions || [], userNames: memberMap };
 }
 
 // 卡片 markdown 段（飞书卡片 markdown tag 逐人一行，同 duty/wecom 卡片口径）
 function renderUserLines(agg, opts = {}) {
   const maxUserLines = opts.maxUserLines || 40;
+  const mode = agg.mode || 'pairs';
   const users = agg.users || [];
   const lines = users.map((u) => {
+    if (mode === 'sessions') {
+      const missing = u.missingSessions ? ` · 缺卡 ${u.missingSessions} 段` : '';
+      return `**${u.name}**：${u.punchDays} 天 · **${fmtDuration(u.totalMs)}**${missing}`;
+    }
     const lonely = u.lonelyDays ? ` · 孤条 ${u.lonelyDays} 天` : '';
     const leftover = u.leftoverCards ? ` · 落单 ${u.leftoverCards} 卡` : '';
     return `**${u.name}**：${u.punchDays} 天 · **${fmtDuration(u.totalMs)}**${lonely}${leftover}`;
@@ -212,7 +341,10 @@ function csvEscape(v) {
 
 // CSV 日明细（UTF-8 BOM 头，Excel 直开不乱码）
 function renderCsv(win, agg) {
-  const head = ['姓名', 'userid', '日期', '星期', '首卡', '末卡', '打卡条数', '当日时长', '落单卡'];
+  const mode = agg.mode || 'pairs';
+  const head = mode === 'sessions'
+    ? ['姓名', 'userid', '日期', '星期', '首卡', '末卡', '打卡条数', '当日时长', '缺卡']
+    : ['姓名', 'userid', '日期', '星期', '首卡', '末卡', '打卡条数', '当日时长', '落单卡'];
   const rows = [head.join(',')];
   for (const d of agg.dayRows || []) {
     rows.push([
@@ -224,7 +356,7 @@ function renderCsv(win, agg) {
       fmtClock(d.last),
       d.count,
       fmtDuration(d.durationMs),
-      d.leftover ? 1 : 0,
+      mode === 'sessions' ? (d.missingSessions || 0) : (d.leftover ? 1 : 0),
     ].map(csvEscape).join(','));
   }
   if (rows.length === 1) rows.push('（本周无打卡记录）,,,,,,,,');
@@ -239,6 +371,7 @@ module.exports = {
   isPastSendTime,
   nextSendTime,
   aggregateDuration,
+  aggregateSessions,
   fmtDuration,
   renderUserLines,
   renderCsv,

@@ -293,4 +293,95 @@ async function fetchFlows(startMs, endMs) {
   return { records, userCount: userIds.length };
 }
 
-module.exports = { fetchFlows, listGroups, listUsersWithUserId, resolveUserIds, resolveGroupMembers };
+// 上海挂钟日期 YYYYMMDD（user_tasks 的 check_date_from/to 参数）
+function shanghaiYmd(ms) {
+  const d = new Date(ms + 8 * 3600 * 1000);
+  return d.getUTCFullYear() * 10000 + (d.getUTCMonth() + 1) * 100 + d.getUTCDate();
+}
+
+// 平台 day（20261012 / 2026-10-12 两种形态）→ 统一 '2026-10-12'
+function platformDayStr(day) {
+  const s = String(day || '');
+  return /^\d{8}$/.test(s) ? `${s.slice(0, 4)}-${s.slice(4, 6)}-${s.slice(6, 8)}` : s;
+}
+
+// 时间戳（秒）→ 上海挂钟日期 'YYYY-MM-DD'（跨天判定用）
+function shanghaiDateOf(sec) {
+  const d = new Date(Number(sec) * 1000 + 8 * 3600 * 1000);
+  return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}-${String(d.getUTCDate()).padStart(2, '0')}`;
+}
+
+/**
+ * 拉取窗口内的平台打卡结果（2026-10-18 曼波定：平台上下班配对才是准的）：
+ * POST /attendance/v1/user_tasks/query，返回按班次配好的 check_in_record/check_out_record。
+ * 工作日边界 06:00（平台 day 字段，06:00–次日 05:59）；跨天班次由平台挂在起始日，
+ * 本函数不按午夜重切。need_overtime_result=true，同一天多个班段（正常+加班）逐段返回。
+ * 单边卡：NoNeedCheck 记为无需下班卡（missing=false），其余标缺卡（missing=true）。
+ * @returns {{sessions: Array, userCount: number, invalidUserIds: string[], unauthorizedUserIds: string[]}}
+ */
+async function fetchTaskSessions(startMs, endMs) {
+  const { userIds, names } = await resolveUserIds();
+  const token = await getTenantAccessToken();
+  const from = shanghaiYmd(startMs);
+  const to = shanghaiYmd(endMs - 1); // end 为下周一 00:00，工作日至周日
+  const sessions = [];
+  const invalidUserIds = [];
+  const unauthorizedUserIds = [];
+
+  for (let i = 0; i < userIds.length; i += BATCH_USER_LIMIT) {
+    const batch = userIds.slice(i, i + BATCH_USER_LIMIT);
+    const qs = new URLSearchParams({ employee_type: 'employee_id', ignore_invalid_users: 'true' });
+    const res = await fetch(`${OPEN_API}/attendance/v1/user_tasks/query?${qs}`, {
+      method: 'POST',
+      signal: AbortSignal.timeout(30000),
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+      body: JSON.stringify({
+        user_ids: batch,
+        check_date_from: from,
+        check_date_to: to,
+        need_overtime_result: true,
+      }),
+    });
+    const j = await readJson(res);
+    if (j.code !== 0) throw feishuAttError(j.code, j.msg);
+    invalidUserIds.push(...((j.data && j.data.invalid_user_ids) || []));
+    unauthorizedUserIds.push(...((j.data && j.data.unauthorized_user_ids) || []));
+
+    for (const task of ((j.data && j.data.user_task_results) || [])) {
+      const uid = String(task.user_id || '');
+      if (!uid) continue;
+      const name = task.employee_name || names.get(uid) || uid;
+      const day = platformDayStr(task.day);
+      for (const seg of (task.records || [])) {
+        const inRec = seg.check_in_record || null;
+        const outRec = seg.check_out_record || null;
+        const inT = inRec && Number(inRec.check_time) ? Number(inRec.check_time) : null;
+        const outT = outRec && Number(outRec.check_time) ? Number(outRec.check_time) : null;
+        if (!inT && !outT) continue; // 排班但未打卡的段不进明细（名单内 0 时长由聚合侧补）
+        const complete = Boolean(inT && outT);
+        // NoNeedCheck 的单边卡是平台规则允许的（无需补另一侧），不算缺卡
+        const missing = !complete && !(
+          (inT && seg.check_out_result === 'NoNeedCheck') ||
+          (outT && seg.check_in_result === 'NoNeedCheck')
+        );
+        sessions.push({
+          userid: uid,
+          _name: name,
+          day,
+          checkin_time: inT,
+          checkout_time: outT,
+          durationMs: complete ? Math.max(0, (outT - inT) * 1000) : 0,
+          complete,
+          missing,
+          cross_day: complete ? shanghaiDateOf(inT) !== shanghaiDateOf(outT) : false,
+          check_in_result: seg.check_in_result || '',
+          check_out_result: seg.check_out_result || '',
+          task_shift_type: Number(seg.task_shift_type) || 0,
+        });
+      }
+    }
+  }
+  return { sessions, userCount: userIds.length, invalidUserIds, unauthorizedUserIds };
+}
+
+module.exports = { fetchFlows, fetchTaskSessions, listGroups, listUsersWithUserId, resolveUserIds, resolveGroupMembers };

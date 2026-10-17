@@ -231,23 +231,46 @@ function archiveLocal(win, agg, records, extra = {}) {
   return result;
 }
 
-// 云文档块序列：heading2 周标题节 + 口径/汇总 + 每人一行 + 全部打卡记录逐条
+// 云文档块序列：heading2 周标题节 + 口径/汇总 + 每人一行 + 全部班段/打卡记录逐条
 function buildDocBlocks(win, agg, records, extra = {}) {
+  const mode = agg.mode || 'pairs';
+  const totals = agg.totals;
+  const ruleLine = mode === 'sessions'
+    ? '口径：按飞书考勤平台上下班配对（工作日 06:00–次日 05:59 切天，跨天班次计入起始日）；单边卡标缺卡、不计时长；名单内未打卡者 0 时长呈现。'
+    : '口径：按人按上海挂钟日聚合，当日打卡按顺序两两配对（1→2、3→4…）记「段末−段首」之和；奇数张末张落单不计（落单卡），跨天相邻卡不配对，恰 1 条记 0（孤条）。';
+  const summaryLine = mode === 'sessions'
+    ? `合计：有效班次 ${totals.completeSessions} 段 · 总时长 ${report.fmtDuration(totals.totalMs)} · 涉及 ${totals.users} 人（有打卡 ${totals.punchUsers} 人）${totals.missingSessions ? ` · 缺卡 ${totals.missingSessions} 段` : ''}`
+    : `合计：打卡 ${totals.punches} 条 · 总时长 ${report.fmtDuration(totals.totalMs)} · 涉及 ${totals.users} 人（有打卡 ${totals.punchUsers} 人）${totals.lonelyDays ? ` · 孤条 ${totals.lonelyDays} 天` : ''}${totals.leftoverCards ? ` · 落单 ${totals.leftoverCards} 卡` : ''}`;
   const blocks = [
     headingBlock(2, `⏱ 打卡时长周报（${win.label}）`),
     textBlock(`生成时间：${new Date().toISOString().slice(0, 19).replace('T', ' ')} · 数据源：${extra.dataSource || config.dataSource}（ZKLink 云考勤${extra.groupLabel ? ` · 考勤组：${extra.groupLabel}` : ''}）`),
-    textBlock(`口径：按人按上海挂钟日聚合，当日打卡按顺序两两配对（1→2、3→4…）记「段末−段首」之和；奇数张末张落单不计（落单卡），跨天相邻卡不配对，恰 1 条记 0（孤条）。`),
-    textBlock(`合计：打卡 ${agg.totals.punches} 条 · 总时长 ${report.fmtDuration(agg.totals.totalMs)} · 涉及 ${agg.totals.users} 人（有打卡 ${agg.totals.punchUsers} 人）${agg.totals.lonelyDays ? ` · 孤条 ${agg.totals.lonelyDays} 天` : ''}${agg.totals.leftoverCards ? ` · 落单 ${agg.totals.leftoverCards} 卡` : ''}`),
+    textBlock(ruleLine),
+    textBlock(summaryLine),
     headingBlock(3, '本周汇总'),
   ];
   for (const u of agg.users) {
-    const lonely = u.lonelyDays ? ` · 孤条 ${u.lonelyDays} 天` : '';
-    blocks.push(textBlock(`• ${u.name}（${u.userid}）：${u.punchDays} 天 · ${report.fmtDuration(u.totalMs)}${lonely}`));
+    const extraLine = mode === 'sessions'
+      ? (u.missingSessions ? ` · 缺卡 ${u.missingSessions} 段` : '')
+      : (u.lonelyDays ? ` · 孤条 ${u.lonelyDays} 天` : '');
+    blocks.push(textBlock(`• ${u.name}（${u.userid}）：${u.punchDays} 天 · ${report.fmtDuration(u.totalMs)}${extraLine}`));
   }
-  blocks.push(headingBlock(3, `打卡明细（全部 ${records.length} 条记录）`));
+  blocks.push(headingBlock(3, `打卡明细（全部 ${records.length} ${mode === 'sessions' ? '个班段' : '条记录'}）`));
   for (const r of records) {
     const mi = (agg.userNames && agg.userNames.get(r.userid)) || null; // memberMap：{name, openId}
     const name = (mi && mi.name) || r._name || r.userid;
+    if (mode === 'sessions') {
+      const range = r.checkin_time && r.checkout_time
+        ? `${report.fmtTime(r.checkin_time * 1000)}→${report.fmtTime(r.checkout_time * 1000)}`
+        : r.checkin_time
+          ? `${report.fmtTime(r.checkin_time * 1000)}→缺下班`
+          : r.checkout_time
+            ? `缺上班→${report.fmtTime(r.checkout_time * 1000)}`
+            : '无记录';
+      const status = r.complete ? report.fmtDuration(r.durationMs) : (r.missing ? '缺卡' : '无需下班卡');
+      const meta = [r.day, status].filter(Boolean).join(' · ');
+      blocks.push(textBlock(`• ${range} ${name}（${r.userid}）${meta ? ` — ${meta}` : ''}`));
+      continue;
+    }
     const meta = [r.checkin_type, r.exception_type && `异常:${r.exception_type}`, r.groupname].filter(Boolean).join(' · ');
     blocks.push(textBlock(`• ${report.fmtTime(r.checkin_time * 1000)} ${name}（${r.userid}）${meta ? ` — ${meta}` : ''}`));
   }

@@ -53,11 +53,16 @@ async function runWeekly({ offset = 0, dryRun = false, trigger = 'cron' } = {}) 
     }
     members = importService.mergeMembers(members, importService.deriveMembers(records));
   } else if (config.dataSource === 'feishu') {
-    // 飞书考勤档（2026-10-07 定案的正路：数据在飞书考勤，应用身份全自动拉流水）
-    const r = await feishuAttendance.fetchFlows(win.start, win.end);
-    records = r.records;
+    // 飞书考勤档（2026-10-18 曼波定：平台上下班配对才是准的）
+    // 数据源从打卡流水 user_flows 切到打卡结果 user_tasks：平台按班次配好上下班卡，
+    // 工作日 06:00–次日 05:59 切天，跨天班次挂在起始日，同一天多个班段逐段返回。
+    const r = await feishuAttendance.fetchTaskSessions(win.start, win.end);
+    records = r.sessions;
+    if (r.invalidUserIds.length || r.unauthorizedUserIds.length) {
+      console.warn(`[打卡周报] 打卡结果名单异常：无效 ${r.invalidUserIds.length} 人、无权限 ${r.unauthorizedUserIds.length} 人`);
+    }
     // 考勤组规则（曼波 2026-10-08 定）：周报名单以考勤组成员为准——没打卡的人 0 时长
-    // 也要出现（aggregateDuration 对名单内零记录者列 0 天）。取不到时回落通讯录全员
+    // 也要出现（aggregateSessions 对名单内零记录者列 0 天）。取不到时回落通讯录全员
     // （仍强于只按打卡记录派生——那会让没人打卡的周整体消失），不炸周报。
     try {
       const gm = await feishuAttendance.resolveGroupMembers();
@@ -82,7 +87,12 @@ async function runWeekly({ offset = 0, dryRun = false, trigger = 'cron' } = {}) 
     const r = await zklinkClient.fetchTransactions(win.start, win.end);
     records = r.records;
   }
-  const agg = report.aggregateDuration(records, members);
+  const agg = config.dataSource === 'feishu'
+    ? report.aggregateSessions(records, members)
+    : report.aggregateDuration(records, members);
+  if (config.dataSource === 'feishu') {
+    console.log(`[打卡周报] 平台班段：${agg.totals.completeSessions} 段有效（${agg.totals.missingSessions} 段缺卡），${agg.totals.punchUsers}/${agg.totals.users} 人有打卡`);
+  }
   const csv = report.renderCsv(win, agg);
   const filename = `打卡时长周报_${win.label.replace(/ ~ /g, '_')}.csv`;
 
