@@ -236,8 +236,8 @@ function buildDocBlocks(win, agg, records, extra = {}) {
   const blocks = [
     headingBlock(2, `⏱ 打卡时长周报（${win.label}）`),
     textBlock(`生成时间：${new Date().toISOString().slice(0, 19).replace('T', ' ')} · 数据源：${extra.dataSource || config.dataSource}（ZKLink 云考勤${extra.groupLabel ? ` · 考勤组：${extra.groupLabel}` : ''}）`),
-    textBlock(`口径：按人按上海挂钟日聚合，单日 ≥2 条打卡记「末卡 − 首卡」为当日时长，恰 1 条记 0（孤条），周合计。`),
-    textBlock(`合计：打卡 ${agg.totals.punches} 条 · 总时长 ${report.fmtDuration(agg.totals.totalMs)} · 涉及 ${agg.totals.users} 人（有打卡 ${agg.totals.punchUsers} 人） · 孤条 ${agg.totals.lonelyDays} 天`),
+    textBlock(`口径：按人按上海挂钟日聚合，当日打卡按顺序两两配对（1→2、3→4…）记「段末−段首」之和；奇数张末张落单不计（落单卡），跨天相邻卡不配对，恰 1 条记 0（孤条）。`),
+    textBlock(`合计：打卡 ${agg.totals.punches} 条 · 总时长 ${report.fmtDuration(agg.totals.totalMs)} · 涉及 ${agg.totals.users} 人（有打卡 ${agg.totals.punchUsers} 人）${agg.totals.lonelyDays ? ` · 孤条 ${agg.totals.lonelyDays} 天` : ''}${agg.totals.leftoverCards ? ` · 落单 ${agg.totals.leftoverCards} 卡` : ''}`),
     headingBlock(3, '本周汇总'),
   ];
   for (const u of agg.users) {

@@ -8,11 +8,12 @@
 // 播报窗口：以「发送日」为锚——窗口 = 发送日 00:00 往前整 7 天。
 // 默认每周一 09:30 发，窗口即上一周一 00:00 ~ 本周一 00:00（上一完整周）。
 //
-// 时长口径（本仓核心，2026-10-07 曼波定"每周统计打卡时长"）：
-//   按人按上海挂钟日聚合，单日打卡 ≥2 条记「末卡 − 首卡」为当日时长，
-//   恰 1 条记 0 并标「孤条」（无法界定时长），0 条=缺勤不在日明细出现。
-//   周时长 = Σ当日时长。平台侧考勤组/班次只影响 ZKLink 自己的报表口径，
-//   不影响本口径（跨班次通宵打卡按挂钟日切断，边界日各算各的）。
+// 时长口径（本仓核心；2026-10-07 定"每周统计打卡时长"，2026-10-15 曼波改定配对规则）：
+//   按人按上海挂钟日聚合，当日打卡按时间排序后顺序两两配对（第1→第2、第3→第4…），
+//   每段 = 段末卡 − 段首卡，周时长 = Σ各段。每张卡最多当一次配对节点——
+//   奇数张时最后一张落单直接不计（leftover 标记）；跨天相邻卡不配对（挂钟日切断）。
+//   恰 1 条=孤条（无任何配对，计 0），0 条=缺勤不在日明细出现。
+//   平台侧考勤组/班次只影响 ZKLink 自己的报表口径，不影响本口径。
 // ============================================================
 
 const SHANGHAI_OFFSET_MS = 8 * 3600 * 1000;
@@ -106,6 +107,7 @@ function nextSendTime(nowMs, sendDow, hour, minute) {
 
 /**
  * 打卡时长聚合（记录流 {userid, _name?, checkin_time(秒)}，名单 [{userid,name}]）
+ * 时长口径：当日打卡顺序两两配对求和，每卡最多当一次节点，落单卡不计（leftover）。
  * 名单外出现的 userid 以原始 userid 展示并标 unknown；名单内整周无记录的人也列出
  * （打卡天数 0），便于一眼看到缺勤。
  */
@@ -132,8 +134,10 @@ function aggregateDuration(records, members) {
     const u = byUser.get(r.userid);
     u.punches += 1;
     const d = u.days.get(day);
-    if (!d) u.days.set(day, { first: t, last: t, count: 1 });
-    else { d.last = t; d.count += 1; } // sorted 保证 last 单调
+    if (!d) u.days.set(day, { first: t, last: t, count: 1, openFrom: t, durationMs: 0 });
+    // 配对状态机：openFrom=等待配对的落单卡时刻；新卡闭合一段后两卡各消费一次
+    else if (d.openFrom == null) { d.last = t; d.count += 1; d.openFrom = t; }
+    else { d.last = t; d.count += 1; d.durationMs += t - d.openFrom; d.openFrom = null; } // sorted 保证 last 单调
   }
 
   // 名单内整周无记录的人也列出来（打卡天数 0），便于负责人一眼看到缺勤
@@ -151,8 +155,10 @@ function aggregateDuration(records, members) {
         first: d.first,
         last: d.last,
         count: d.count,
-        durationMs: d.count >= 2 ? d.last - d.first : 0,
-        lonely: d.count < 2, // 孤条：当日仅 1 条打卡，时长不可界定
+        durationMs: d.durationMs,
+        lonely: d.count < 2, // 孤条：当日仅 1 条打卡，无配对可言
+        // 落单卡：奇数张时末张未参与配对（孤条日由 lonely 表达，不重复计）
+        leftover: d.openFrom != null && d.count >= 2 ? 1 : 0,
       }));
     const totalMs = days.reduce((s, d) => s + d.durationMs, 0);
     return {
@@ -163,6 +169,7 @@ function aggregateDuration(records, members) {
       punchDays: days.length,
       punches: u.punches,
       lonelyDays: days.filter((d) => d.lonely).length,
+      leftoverCards: days.reduce((s, d) => s + d.leftover, 0),
       totalMs,
       days,
     };
@@ -174,6 +181,7 @@ function aggregateDuration(records, members) {
     users: users.length,
     punchUsers: users.filter((u) => u.punches > 0).length,
     lonelyDays: users.reduce((s, u) => s + u.lonelyDays, 0),
+    leftoverCards: users.reduce((s, u) => s + (u.leftoverCards || 0), 0),
     totalMs: users.reduce((s, u) => s + u.totalMs, 0),
   };
   // 日明细平铺（CSV 渲染复用）
@@ -188,7 +196,8 @@ function renderUserLines(agg, opts = {}) {
   const users = agg.users || [];
   const lines = users.map((u) => {
     const lonely = u.lonelyDays ? ` · 孤条 ${u.lonelyDays} 天` : '';
-    return `**${u.name}**：${u.punchDays} 天 · **${fmtDuration(u.totalMs)}**${lonely}`;
+    const leftover = u.leftoverCards ? ` · 落单 ${u.leftoverCards} 卡` : '';
+    return `**${u.name}**：${u.punchDays} 天 · **${fmtDuration(u.totalMs)}**${lonely}${leftover}`;
   });
   const shown = lines.slice(0, maxUserLines);
   if (lines.length > shown.length) shown.push(`…其余 ${lines.length - shown.length} 人见云文档留档`);
@@ -203,7 +212,7 @@ function csvEscape(v) {
 
 // CSV 日明细（UTF-8 BOM 头，Excel 直开不乱码）
 function renderCsv(win, agg) {
-  const head = ['姓名', 'userid', '日期', '星期', '首卡', '末卡', '打卡条数', '当日时长'];
+  const head = ['姓名', 'userid', '日期', '星期', '首卡', '末卡', '打卡条数', '当日时长', '落单卡'];
   const rows = [head.join(',')];
   for (const d of agg.dayRows || []) {
     rows.push([
@@ -215,6 +224,7 @@ function renderCsv(win, agg) {
       fmtClock(d.last),
       d.count,
       fmtDuration(d.durationMs),
+      d.leftover ? 1 : 0,
     ].map(csvEscape).join(','));
   }
   if (rows.length === 1) rows.push('（本周无打卡记录）,,,,,,,,');

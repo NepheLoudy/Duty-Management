@@ -242,7 +242,8 @@ async function deployCode(sftp, plan) {
 // npm install
 function npmInstall(sftp, plan) {
   console.log('\n安装依赖...');
-  exec('export PATH=/c/Program Files/nodejs:/c/tools/node-v22.10.0-win-x64:/mingw64/bin:/usr/local/bin:/usr/bin:/bin; cd ' + REMOTE_DIR + ' && npm install --omit=dev', () => uploadEnv(sftp, plan));
+  // v56：PATH 值含空格必须整体加引号（v55「PATH 精简」漏引号 → export 报 not a valid identifier → npm not found，部署在 npm install 步 exit 127，2026-10-17 运维台 push 实锤）
+  exec('export PATH="/c/Program Files/nodejs:/c/tools/node-v22.10.0-win-x64:/mingw64/bin:/usr/local/bin:/usr/bin:/bin"; cd ' + REMOTE_DIR + ' && npm install --omit=dev', () => uploadEnv(sftp, plan));
 }
 
 // ============ [3/4] 上传 .env 与私有配置 ============

@@ -39,7 +39,7 @@ check('heading2 块 block_type=4', hb.block_type === 4 && hb.heading2.elements[0
 
 const blocks = feishuDoc.buildDocBlocks(win, agg, records, { dataSource: 'import', groupLabel: '实验室考勤组' });
 check('首块=heading2 周标题', blocks[0].block_type === 4 && blocks[0].heading2.elements[0].text_run.content.includes('2026-09-14 ~ 2026-09-20'), JSON.stringify(blocks[0]).slice(0, 120));
-check('含口径说明', blocks.some((b) => b.text && b.text.elements[0].text_run.content.includes('末卡 − 首卡')));
+check('含口径说明', blocks.some((b) => b.text && b.text.elements[0].text_run.content.includes('两两配对')));
 check('汇总行含总时长', blocks.some((b) => b.text && b.text.elements[0].text_run.content.includes('9小时7分钟')));
 check('每人汇总行', blocks.some((b) => b.text && b.text.elements[0].text_run.content.includes('张三（zhangsan）：2 天')));
 const detailIdx = blocks.findIndex((b) => b.block_type === 5 && b.heading3.elements[0].text_run.content.includes('打卡明细'));

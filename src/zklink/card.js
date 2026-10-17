@@ -8,14 +8,18 @@ const report = require('./report');
 function buildWeeklyCard(win, agg, opts = {}) {
   const maxUserLines = opts.maxUserLines || 40;
   const users = agg.users || [];
-  const hasIssue = agg.totals.lonelyDays > 0 || users.some((u) => u.punches === 0);
+  const hasIssue = agg.totals.lonelyDays > 0 || agg.totals.leftoverCards > 0 || users.some((u) => u.punches === 0);
   const userLines = report.renderUserLines(agg, { maxUserLines });
+  const extras = [
+    agg.totals.lonelyDays ? ` · 孤条 ${agg.totals.lonelyDays} 天` : '',
+    agg.totals.leftoverCards ? ` · 落单 ${agg.totals.leftoverCards} 卡` : '',
+  ].join('');
   const elements = [
-    { tag: 'markdown', content: `**打卡 ${agg.totals.punches} 条 · 合计时长 ${report.fmtDuration(agg.totals.totalMs)} · 涉及 ${agg.totals.users} 人（有打卡 ${agg.totals.punchUsers} 人）${agg.totals.lonelyDays ? ` · 孤条 ${agg.totals.lonelyDays} 天` : ''}**` },
+    { tag: 'markdown', content: `**打卡 ${agg.totals.punches} 条 · 合计时长 ${report.fmtDuration(agg.totals.totalMs)} · 涉及 ${agg.totals.users} 人（有打卡 ${agg.totals.punchUsers} 人）${extras}**` },
     { tag: 'hr' },
     { tag: 'markdown', content: agg.totals.punches ? userLines.join('\n') : '本周无打卡记录（检查名单与 ZKLink 考勤组导出是否匹配）' },
     { tag: 'hr' },
-    { tag: 'markdown', content: `> 口径：单日 ≥2 条记「末卡−首卡」，1 条=孤条不计时长 · 打卡明细已留档云文档 · 数据来自 ZKLink 云考勤` },
+    { tag: 'markdown', content: `> 口径：当日打卡按顺序两两配对（1→2、3→4…）记「段末−段首」之和，落单卡与跨天段不计 · 打卡明细已留档云文档 · 数据来自 ZKLink 云考勤` },
   ];
   return {
     config: { wide_screen_mode: true },
