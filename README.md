@@ -177,6 +177,23 @@
   多周时中间周需人工 `test-broadcast` 带 `weekOffset` 逐周补；③`preview` 端点无鉴权
   （仅回环监听+只读约定），响应含全员时长明细。
 
+## 可选插件：梯队评价表考勤时长回填（2026-10-20，可拔插）
+
+- **用途**：把每周平台班段统计的考勤时长（小时，1 位小数）写进目标 bitable 的「考勤时长」
+  数字列。目标表按「时段」分组（15 名梯队队员 × 3 组），第一组 = 10.12-10.18（视图 week6；
+  表内选项名 Week5 是历史标签），之后每周推进一组。
+- **触发**：`ROSTER_FILL_CRON`（默认周一 09:40 上海，打卡周报 09:30 之后）→ 取上一周周一，
+  组序号 = `(目标周一 − ROSTER_FILL_FIRST_WEEK_START) / 7` → 只写该组记录的「考勤时长」。
+- **匹配**：表内「梯队队员」open_id 优先，姓名兜底；未匹配的行保留原值并打印名单。
+- **手动**：`node scripts/roster-fill.js --week-start 2026-10-12`（默认 dry-run，
+  `--confirm` 写入；`--no-overwrite` 保留已有值）。
+- **配置**：`ROSTER_FILL_ENABLED=1` + `ROSTER_FILL_APP_TOKEN` / `TABLE_ID` /
+  `FIELD_MEMBER/DURATION/PERIOD` / `FIRST_WEEK_START`，见 `.env.example`。
+- **拔掉**：`ROSTER_FILL_ENABLED=0` 即停 cron；删 `src/plugins/rosterFill/` +
+  `src/index.js` 里的一行启动调用即完全移除，核心链路零依赖。
+- **边界**：只写时长列，不动请假/效率减免/时长警示/合格公式；组序号超出表内组数时跳过并告警。
+- **测试**：`npm run test:roster-fill`（16 断言：组映射/上一周/open_id 优先/未匹配/只写时长列/dry-run/覆盖/越界）。
+
 ## API
 
 | 方法 | 路径 | 说明 |
@@ -227,6 +244,8 @@ npm run test:roster     # 名册同步与定制窗口（通讯录同步/白名�
 npm run test:board      # 看板 webhook 通道（payload/签名/错误路径/通道选择/限流）
 npm run test:express    # 快递助手（窗口/登记/配对/取件/播报/图片窗口守卫）
 npm run test:generate-place  # 排班生成补偿义务 placed 即时标记（中断不双倍补偿）
+npm run test:zklink-sessions  # 打卡结果平台配对（user_tasks / 06:00 切天 / 缺卡）
+npm run test:roster-fill      # 梯队表考勤时长回填插件（组映射 / 只写时长列 / dry-run）
 npm run table:check     # 校验 .env 配置的表格字段是否符合约定
 npm run table:create    # 自动新建 Bitable+排班表（打印 app_token/table_id 供 .env 回填）
 ```

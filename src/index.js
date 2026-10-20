@@ -415,6 +415,16 @@ function startServer() {
   state.load(); // 启动即确保状态目录存在（DUTY_STATE_FILE / QUIET_BACKLOG_FILE 同目录场景）
   startCronJobs();
 
+  // 可选插件：梯队评价表考勤时长回填（ROSTER_FILL_ENABLED=1 时加载）。
+  // 插件自管 cron，核心链路不依赖；关开关或删 src/plugins/rosterFill 即拔掉。
+  if (process.env.ROSTER_FILL_ENABLED === '1') {
+    try {
+      require('./plugins/rosterFill').startIfEnabled();
+    } catch (err) {
+      console.error('[插件] rosterFill 启动失败（不影响核心功能）:', err.message);
+    }
+  }
+
   // 启动即同步通讯录名册（失败沿用本地名册，不阻断启动；同步后再校验一次输出准确人数）
   roster.syncFromContacts()
     .then(() => roster.validateStartup())
