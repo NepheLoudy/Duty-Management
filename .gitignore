@@ -41,3 +41,4 @@ zklink-data/
 # 调试/临时 dump 禁入库（2026-10-14：.tmp-kaoqin-roster.json 隐私事故——真实姓名+open_id 曾随 50f019a 入库）
 .tmp-*
 *.tmp.json
+tmp-*
