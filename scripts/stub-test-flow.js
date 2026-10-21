@@ -36,7 +36,17 @@ process.env.DUTY_GROUP_CHAT_IDS = '';
 process.env.DUTY_BOARD_WEBHOOK_URL = '';
 
 // ---- stub 注入（先于服务模块加载） ----
+// ---- 时钟隔离（2026-10-22 验收跨零点改）：会话守卫按值日业务日 dutyDateStr 判定，
+// 本套件按「白天」语义编写（会话与记录都建在今天）；凌晨 00:00–06:00 运行时业务日=昨天
+// 会误伤全部会话用例——把业务日钉住为挂钟今天（白天恒等式）。跨零点行为由
+// stub-test-midnight-accept.js 冻结时钟专项覆盖。
 // 通讯录 stub：名册同步回显当前名册文件（openId 原样保留，未绑定仍为空，测试语义不变）
+const realDates = require('../src/utils/dates');
+require.cache[require.resolve('../src/utils/dates')] = {
+  id: 'dates-flow-stub', filename: 'dates-flow-stub', loaded: true,
+  exports: { ...realDates, dutyDateStr: () => realDates.todayStr() },
+};
+
 require.cache[require.resolve('../src/feishu/contacts')] = {
   id: 'contacts-stub', filename: 'contacts-stub', loaded: true,
   exports: { async listAllUsers() {
@@ -190,12 +200,12 @@ function check(desc, cond, detail = '') {
   const stranger = await inquiry.handleYes('ou_unknown');
   check('非值日队员回「是」→ 礼貌忽略', stranger.handled === false && stranger.reply.includes('值日助手'));
 
-  // ---- 3.5 21:00 临门提醒（2026-09-16） ----
+  // ---- 3.5 23:00 临门提醒（2026-09-16；2026-10-22 验收延至次日凌晨 4:00 后改文案口径） ----
   const lastcallDry = await inquiry.sendLastCall({ dryRun: true });
   check('临门提醒 dryRun：未完结 2 人（队员B/队员C）', lastcallDry.sent.length === 2, JSON.stringify(lastcallDry.sent.map((x) => x.name)));
   check('临门提醒 dryRun：队员A 已完结不打扰', !lastcallDry.sent.some((x) => x.name === '队员A'));
   await inquiry.sendLastCall();
-  check('临门提醒：私信 2 人且带收口倒计时指引', memory.dmCalls.filter((c) => c.text.includes('还剩约 1 小时')).length === 2);
+  check('临门提醒：私信 2 人且告知验收延长至次日凌晨 4:00', memory.dmCalls.filter((c) => c.text.includes('还没完成打卡') && c.text.includes('次日凌晨 4:00')).length === 2);
   check('临门提醒：队员B 已传照片 → 提示只需打卡', memory.dmCalls.some((c) => c.openId === 'ou_test_b' && c.text.includes('照片已收到')));
   check('临门提醒：未传照片者引导照片+打卡', memory.dmCalls.some((c) => c.openId === 'ou_test_c' && c.text.includes('上传现场照片')));
 

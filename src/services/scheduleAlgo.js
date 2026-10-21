@@ -195,7 +195,7 @@ function generateSchedule({ members, startDateStr, days, history = [], insertion
 
   // -- 1) 补偿插入优先安置（可突破轮次上限，该日变成 4 人） --
   // 周级容量闸门（2026-09-25 检修）：非请假位插入每周最多 allowance 条，超出留队
-  // （unplacedInsertions，由 00:30 对账的 placePending 后续安置），防止欠账集中
+  // （unplacedInsertions，由对账的 placePending 后续安置），防止欠账集中
   // 插进生成范围头部把一周插成天天 4 人。普通生成 assignments 无 status → 无请假位；
   // 重排场景（preassigned 预置）保留的已请假记录会被识别为请假空缺位（fillLeave 不占容量）。
   const allowance = weeklyAllowance == null ? 2 : weeklyAllowance;
@@ -204,7 +204,7 @@ function generateSchedule({ members, startDateStr, days, history = [], insertion
   for (const ins of insertions) {
     if (!quotas.has(ins.name)) {
       // 不在值日队列（如白名单成员）：补偿义务不豁免，进未安置队列留
-      // placePending 兜底安置（00:30 对账），并随生成回执上报
+      // placePending 兜底安置（04:30 对账），并随生成回执上报
       unplacedInsertions.push(ins);
       continue;
     }

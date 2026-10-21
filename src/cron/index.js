@@ -20,10 +20,10 @@ const zklinkConfig = require('../zklink/config');
 //   2. 当日询问   DUTY_ASK_SCHEDULE          (0 30 18 * * *, D 日 18:30 私信询问，开启监听窗口)
 //   2.5 中午提醒  DUTY_NOON_REMIND_SCHEDULE   (0 5 12 * * *,  D 日 12:05 私信点名+职责，
 //                 提前开启监听会话（下午即可打卡），v46 新增)
-//   3. 收口       DUTY_DEADLINE_SCHEDULE     (0 0 0 * * *,   D 日 24:00（午夜）：置未做完/算总状态/生成补偿；
-//                                                 0 点已跨日，归属日期由 deadline runner 显式指定为 D 日)
-//   3.5 临门提醒  DUTY_LASTCALL_SCHEDULE      (0 0 23 * * *,  D 日 23:00 私信未完结队员，收口前最后触达)
-//   4. 对账       DUTY_RECONCILE_SCHEDULE    (0 30 0 * * *,  每日 00:30 重算总状态/核对补偿义务)
+//   3. 收口       DUTY_DEADLINE_SCHEDULE     (0 0 4 * * *,   值日次日凌晨 04:00（2026-10-22 曼波改）：
+//                                                 置未做完/算总状态/生成补偿；已跨日，归属日期由 runner 判定)
+//   3.5 临门提醒  DUTY_LASTCALL_SCHEDULE      (0 0 23 * * *,  D 日 23:00 私信未完结队员，文案告知验收延至次日 04:00)
+//   4. 对账       DUTY_RECONCILE_SCHEDULE    (0 30 4 * * *,  收口后 04:30 对账；落静默窗 → 积压 09:00 冲刷重跑)
 //   5. 看板播报   DUTY_BOARD_BROADCAST_SCHEDULE (0 0 12 * * *, 每日 12:00 webhook 推今日值日看板)
 //
 // 晚间静默（02:00–09:00，Asia/Shanghai，可配）：
@@ -104,15 +104,15 @@ function startCronJobs() {
   }
 
   // 收口：写表动作不延迟（不进 gateTask），仅通知载荷过闸门。
-  // 24:00（0 点）收口已跨日：closeToday 默认取「今天」会落空——归属日按上海墙上时钟
-  // 判定（2026-09-27 修）：凌晨 <06:00 触发的收口一律归属前一日 D 日（正常 0 点触发与
-  // 宿主休眠/积压导致的延迟补触都落在此窗）；白天触发=当天（手动把收口改到白天的语义不变）。
-  // 此前按 now-30min 推算归属，触发被延迟超 30 分钟时推算落进新当天，会把新当天
-  // 整日记录误置「未做完」。
+  // 值日次日凌晨 04:00 收口（2026-10-22 曼波改，原 24:00）已跨日：closeToday 默认取
+  // 「今天」会落空——归属日按上海墙上时钟判定：凌晨 <10:00 触发一律归属前一日 D 日
+  // （正常 04:00 触发 + 宿主休眠/积压导致的延迟补触都落在此窗，与原 0 点收口 +6h 容错同宽；
+  // 10 点后触发=当天，手动白天触发的语义不变）。此前 <06:00 边界按 0 点收口设计，
+  // 收口挪到 04:00 后延迟超 2 小时就会误归属新当天，把新当天整日记录误置「未做完」。
   const deadlineTask = cron.schedule(config.schedule.deadline, () => {
     console.log('[定时任务] 触发值日收口');
     const now = shanghaiParts();
-    const dutyDate = now.hh < 6 ? addDays(now.dateStr, -1) : now.dateStr;
+    const dutyDate = now.hh < 10 ? addDays(now.dateStr, -1) : now.dateStr;
     runClose({ dateStr: dutyDate })
       .catch((err) => console.error('[定时任务] 值日收口失败:', err.message));
   }, { timezone: 'Asia/Shanghai' });

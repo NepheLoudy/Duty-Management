@@ -94,12 +94,17 @@ module.exports = {
     // 当日中午提醒（2026-10-07 v46 新增）：D 日 12:05 私信当日队员点名+职责，
     // 并提前开启监听会话（下午完工即可打卡）；12:05 与 12:00 看板播报错峰
     noonRemind: process.env.DUTY_NOON_REMIND_SCHEDULE || '0 5 12 * * *',
-    // 收口前 1 小时临门提醒（2026-09-16 新增；2026-09-17 随收口推迟到 23:00）
+    // 收口前临门提醒（2026-09-16 新增）。保留 23:00 深夜触达——验收虽延至次日 04:00，
+    // 但 03:00 落在静默窗（02:00–09:00）会被积压到 09:00 冲刷，彻底失去「临门」意义；
+    // 文案改为告知验收延长（凌晨 4:00 前打卡均有效）
     lastCall: process.env.DUTY_LASTCALL_SCHEDULE || '0 0 23 * * *',
-    // 24:00（午夜）收口（2026-09-17 用户口径：大家下班晚，原 22:00 提前）。
-    // 注意：0 点已跨日，cron 收口归属前一天（见 cron deadline runner 的 dateStr 处理）
-    deadline: process.env.DUTY_DEADLINE_SCHEDULE || '0 0 0 * * *',
-    reconcile: process.env.DUTY_RECONCILE_SCHEDULE || '0 30 0 * * *',
+    // 值日验收收口（2026-10-22 曼波改：24:00 → 值日次日凌晨 04:00，夜班同学 24:00 前
+    // 完不成）。0 点后已跨日：归属日期由 cron deadline runner 显式判定（<10 点=前一日 D 日）。
+    // 注意：04:00 在静默窗内——写表动作不延迟立即执行，仅收口回执通知过闸门 09:00 补发
+    deadline: process.env.DUTY_DEADLINE_SCHEDULE || '0 0 4 * * *',
+    // 对账（随收口改 04:30，2026-10-22）：必须在收口之后跑（否则会在验收前把当天
+    // 空状态误置未做完）。04:30 落静默窗内 → gateTask 登记积压、09:00 冲刷重跑（可重扫语义），
+    reconcile: process.env.DUTY_RECONCILE_SCHEDULE || '0 30 4 * * *',
     // 每日自动播报今日值日看板（群自定义机器人 webhook 通道，过静默闸门）
     boardBroadcast: process.env.DUTY_BOARD_BROADCAST_SCHEDULE || '0 0 12 * * *',
   },

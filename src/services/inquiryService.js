@@ -1,5 +1,5 @@
 const config = require('../config');
-const { addDays, todayStr } = require('../utils/dates');
+const { addDays, todayStr, dutyDateStr } = require('../utils/dates');
 const bot = require('../feishu/bot');
 const client = require('../feishu/client');
 const dutyTable = require('./dutyTableService');
@@ -12,11 +12,13 @@ const plaza = require('./plaza');
 
 // ============================================================
 // 私信闭环：D-1 提醒 → 当日询问（18:30，开启监听会话）→ 是/否/照片写回
-// → 24:00（午夜）收口（未回复置未做完、算当日总状态、生成补偿插入）→ 请假
+// → 次日凌晨 04:00 收口（未回复置未做完、算当日总状态、生成补偿插入）→ 请假
 //
 // 监听对象仅限当日 3 名值日队员（按 open_id 匹配当日记录；未绑定成员
 // 跳过私信、看板标注「未绑定」）。「是」与照片独立生效：照片先到先挂
 // 对应岗位附件栏，「是」到了才置已做完（收口前均监听）。
+// 验收窗口跨零点（2026-10-22 曼波改：收口 24:00 → 次日 04:00）：会话日期守卫
+// 按值日业务日（dutyDateStr，<06:00 算前一日）判定，凌晨打卡/传照片还算当天。
 // 收口的写表动作不延迟（晚间静默语义），只有回执通知由调用方过闸门。
 // ============================================================
 
@@ -179,7 +181,7 @@ async function sendNoonRemind(options = {}) {
       `职责：${positionDutyText(rec.position)}`,
       '',
       '下午完工后回复「打卡」并上传现场照片（照片会写入值日表对应岗位栏），现在起即可打卡。',
-      '18:30 会再私信确认；24:00（午夜）统一收口，未打卡记「未做完」。想请假回复「我要请假」。',
+      '18:30 会再私信确认；值日验收到次日凌晨 4:00（今晚 24:00 后仍可打卡），逾期未打卡记「未做完」。想请假回复「我要请假」。',
     ].join('\n');
     if (dryRun) {
       sent.push({ name: member.name, position: rec.position, preview: text });
@@ -229,7 +231,7 @@ async function askToday(options = {}) {
       `职责：${positionDutyText(rec.position)}`,
       '',
       '完成后请回复「打卡」完成值日打卡，并上传现场照片（照片会写入值日表对应岗位栏）。',
-      '24:00（午夜）统一收口，未打卡会记为「未做完」；想请假回复「我要请假」。',
+      '值日验收到次日凌晨 4:00（今晚 24:00 后仍可打卡），逾期未打卡会记为「未做完」；想请假回复「我要请假」。',
     ];
     // 有未过期的 DDL 逾期确认时加冲突提示（2026-09-13 口径：值日打卡用「打卡」，
     // 回复「是」会确认 DDL 项目而非打卡；hub 查不到时静默降级不加提示）
@@ -265,12 +267,13 @@ async function askToday(options = {}) {
 }
 
 /** 会话里找当日记录（重新查表拿最新状态，会话只作身份与岗位锚点）。
- *  日期守卫：过期会话（错过收口的残留）直接清理，晚到的「是/否/照片」一律不认。 */
+ *  日期守卫：按值日业务日判定（dutyDateStr：<06:00 算前一日）——验收窗口跨零点，
+ *  凌晨 00:00–04:00 的「是/否/照片」还算值日当天；过期会话（错过收口的残留）直接清理。 */
 async function sessionRecord(openId) {
   const s = state.load();
   const session = s.sessions[openId];
   if (!session) return { session: null, rec: null, member: null };
-  if (session.date !== todayStr()) {
+  if (session.date !== dutyDateStr()) {
     state.mutate((st) => { delete st.sessions[openId]; });
     return { session: null, rec: null, member: null };
   }
@@ -312,7 +315,7 @@ async function handleNo(openId) {
   }
   return {
     handled: true,
-    reply: '收到。24:00（午夜）收口前你仍可以：补传现场照片 + 回复「打卡」完成打卡；或回复「我要请假」登记请假。',
+    reply: '收到。次日凌晨 4:00 验收收口前你仍可以：补传现场照片 + 回复「打卡」完成打卡；或回复「我要请假」登记请假。',
   };
 }
 
@@ -353,18 +356,21 @@ async function handleImage({ openId, imageKey, imageKeys, messageId }) {
   return {
     handled: true,
     reply: `📸 已收到${plural}写入「${session.position}」凭证栏（该岗累计 ${count} 张）。`
-      + (doneMarked ? '今日值日已完成，辛苦了！' : '完成后记得回复「打卡」，收口（24:00）前有效。'),
+      + (doneMarked ? '今日值日已完成，辛苦了！' : '完成后记得回复「打卡」，验收（次日凌晨 4:00）前有效。'),
   };
 }
 
 /**
  * D 日 23:00 临门提醒：私信当日仍未完结队员（可重扫任务，过静默闸门）。
  * 2026-09-16 新增：18:30 询问后到收口之间无任何再触达，成员忘了就是「未做完」。
+ * 2026-10-22 随验收延期改口径：保留 23:00 深夜触达（03:00 落静默窗会被积压到
+ * 09:00 失去临门意义），文案告知验收延长至次日凌晨 4:00。
  * @returns {{date, sent: number, skipped: Array, preview: Array}}
  */
 async function sendLastCall(options = {}) {
   const dryRun = Boolean(options.dryRun);
-  const date = todayStr();
+  // 23:00 触发时 dutyDateStr()=今天；容错延迟触发（跨零点后仍定位值日当天 D）
+  const date = dutyDateStr();
   const recs = await dutyTable.getRecordsByDate(date);
 
   const sent = [];
@@ -378,11 +384,11 @@ async function sendLastCall(options = {}) {
     }
     const photos = Object.values(rec.receiptCounts).some((n) => n > 0);
     const lines = [
-      `⏰ 提醒：今天（${date}）值日 24:00（午夜）收口，还剩约 1 小时——你的【${rec.position}】还没完成打卡。`,
+      `⏰ 提醒：今天（${date}）的值日验收到次日凌晨 4:00——你的【${rec.position}】还没完成打卡。`,
       photos
         ? '照片已收到 ✅，回复「打卡」即完成值日。'
-        : '完成后回复「打卡」并上传现场照片（照片会写入值日表）。',
-      '确实做不完：回复「我要请假」，或收口后记「未做完」（下周自动补偿一次）。查询排班发「值日助手」。',
+        : '完成后回复「打卡」并上传现场照片（照片会写入值日表）；今晚做不完也可以凌晨补打卡。',
+      '确实做不完：回复「我要请假」，或验收后记「未做完」（下周自动补偿一次）。查询排班发「值日助手」。',
     ];
     const text = lines.join('\n');
     if (dryRun) {
@@ -401,7 +407,7 @@ async function sendLastCall(options = {}) {
 }
 
 /**
- * D 日 24:00（午夜）收口：
+ * D 日收口（值日次日凌晨 04:00 触发，2026-10-22 曼波改：原 24:00）：
  * - 仍未回复「是」者置「未做完」（已传照片但没答「是」的同样置未做完）；
  * - 计算当日总状态（三个附件栏各有照片且全部已做完 → 今日完成值日）；
  * - 未做完成员生成下周补偿插入义务（已请假者在请假当时已生成）；
@@ -411,7 +417,7 @@ async function sendLastCall(options = {}) {
  */
 async function closeToday(options = {}) {
   const dryRun = Boolean(options.dryRun);
-  // 24:00（0 点）收口跨日：调用方（cron deadline runner）显式传归属日期（=值日当天 D 日）；
+  // 次日凌晨 04:00 收口已跨日：调用方（cron deadline runner）显式传归属日期（=值日当天 D 日）；
   // 手动 test-close 不传时取「今天」
   const date = options.dateStr || todayStr();
   const recs = await dutyTable.getRecordsByDate(date);
@@ -446,7 +452,7 @@ async function closeToday(options = {}) {
         compensation.handleAbsence(rec.name, date, config.status.MISS);
       }
     }
-    // 清空当日会话并记录收口水位（供 00:30 对账补收口判断）
+    // 清空当日会话并记录收口水位（供对账补收口判断）
     state.mutate((s) => {
       for (const [openId, session] of Object.entries(s.sessions)) {
         if (session.date === date) delete s.sessions[openId];
@@ -470,7 +476,7 @@ async function closeToday(options = {}) {
     `- 当日总状态：${dayStatus || '未完成（保持为空）'}`,
     `- 未做完 ${missList.length} 人${missList.length ? '：' + missList.map((r) => `${r.name}（${r.position}${r.photos ? '，有照片未答是' : ''}${(roster.findByName(r.name) || {}).openId ? '' : '，未绑定未通知'}）`).join('、') : ''}`,
     `- 请假 ${leaveList.length} 人${leaveList.length ? '：' + leaveList.map((r) => `${r.name}（${r.position}）`).join('、') : ''}`,
-    `- 补偿插入义务已登记（下周生效），00:30 对账核对安置`,
+    `- 补偿插入义务已登记（下周生效），04:30 对账核对安置`,
   ];
 
   return {

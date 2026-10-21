@@ -71,6 +71,17 @@ function todayStr() {
   return shanghaiParts().dateStr;
 }
 
+/**
+ * 值日业务日（收口归属口径）：上海挂钟 <06:00 仍算前一个值日日。
+ * 值日验收（收口）在次日凌晨 04:00（2026-10-22 曼波改），凌晨 0 点后队员仍在对
+ * D 日的监听会话里打卡——私信会话日期守卫与收口归属共用此判定，保证 00:00–04:00
+ * 的「打卡/照片」还算值日当天。cron 收口的延迟补触容错窗口更宽（<10 点），在 cron 层单独判定。
+ */
+function dutyDateStr(input = new Date()) {
+  const p = shanghaiParts(input);
+  return p.hh < 6 ? addDays(p.dateStr, -1) : p.dateStr;
+}
+
 module.exports = {
   TZ_OFFSET_MS,
   shanghaiParts,
@@ -81,4 +92,5 @@ module.exports = {
   mondayOf,
   monthAdd,
   todayStr,
+  dutyDateStr,
 };
