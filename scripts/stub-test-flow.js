@@ -446,6 +446,18 @@ function check(desc, cond, detail = '') {
     // 请假空缺位（fillLeave 会绕过容量闸门）；种子条数取当前生效的周额度 K（本测 K=10）
     const K = Number(config.generate.weeklyInsertionAllowance) || 2;
     const capWeekStart = mondayOf(addDays(today, 21));
+    // 目标周班次记录清空（生成月会铺满该周，队员C 可能天天有班 → planInsertion 无候选 →
+    // 走「满周顺延」而非被测的容量闸门路径，随日期种子漂移误报）。清空后 ob_cap_new 必有
+    // 候选日（空日人数 0），稳定命中 weekly_allowance 分支——本节只测闸门，不测安置选址。
+    const capWeekEnd = addDays(capWeekStart, 6);
+    for (let d = capWeekStart; d <= capWeekEnd; d = addDays(d, 1)) {
+      const rs = await dutyTable.getRecordsByDate(d);
+      if (rs.length) await dutyTable.batchDeleteRecords(rs.map((r) => r.recordId));
+    }
+    // 周内留一条他人记录：placePending 只对「周已有排班」的义务做安置判定（周空 = 留队
+    // 等生成），留 D 的记录让 ob_cap_new 稳定进入安置路径；C 无该周记录 → 候选日必有 →
+    // 命中容量闸门（账本 10 ≥ K）→ weekly_allowance 顺延
+    await dutyTable.createDayRecords(addDays(capWeekStart, 1), [{ member: roster.findByName('队员D'), position: '工位区' }]);
     const mk = (id, name) => ({
       id, name, dutyDate: addDays(today, -1), weekStart: capWeekStart,
       reason: '已请假', placed: false, createdAt: new Date().toISOString(),
@@ -538,24 +550,34 @@ function check(desc, cond, detail = '') {
   await dutyTable.createDayRecords(d5Date, [
     { member: roster.findByName('队员A'), position: '总负责' },
     { member: roster.findByName('队员B'), position: '工位区' },
+    // 队员C 同日两条记录（补偿插入场景）：一次运行内只准发一条（2026-10-23 蒋梓来重复卡回归）
+    { member: roster.findByName('队员C'), position: '装配区' },
+    { member: roster.findByName('队员C'), position: '总负责' },
   ]);
   memory.dmFailFor = 'ou_test_a';
   const dedup1 = await inquiry.sendAheadRemind({ daysAhead: 5 });
-  check('预告第一枪：B 发出、A 发送失败未被标记',
-    dedup1.sent.length === 1 && dedup1.sent[0].name === '队员B'
-      && dedup1.skipped.some((s) => s.name === '队员A' && s.reason.includes('发送失败')),
+  check('预告第一枪：B/C 发出、A 发送失败未被标记',
+    dedup1.sent.length === 2 && dedup1.sent.some((x) => x.name === '队员B') && dedup1.sent.some((x) => x.name === '队员C')
+      && dedup1.skipped.some((x) => x.name === '队员A' && x.reason.includes('发送失败')),
     JSON.stringify({ sent: dedup1.sent, skipped: dedup1.skipped }));
+  check('预告第一枪：C 同日两条记录只发一条（同 run 去重）',
+    memory.dmCalls.filter((c) => c.openId === 'ou_test_c' && c.text.includes('值日预告')).length === 1
+      && dedup1.skipped.some((x) => x.name === '队员C' && x.reason.includes('今日已预告')),
+    JSON.stringify(dedup1.skipped));
   check('预告第一枪：失败者不进今日已发账目',
-    Object.keys((state.load().aheadReminded || {})[`${today}|5`] || {}).length === 1,
+    Object.keys((state.load().aheadReminded || {})[`${today}|5`] || {}).length === 2,
     JSON.stringify(state.load().aheadReminded));
   memory.dmFailFor = null;
   const dedup2 = await inquiry.sendAheadRemind({ daysAhead: 5 });
-  check('预告第二枪：A 失败补发、B 去重跳过不重发',
+  check('预告第二枪：A 失败补发、B/C 去重跳过不重发',
     dedup2.sent.length === 1 && dedup2.sent[0].name === '队员A'
-      && dedup2.skipped.some((s) => s.name === '队员B' && s.reason.includes('今日已预告')),
+      && dedup2.skipped.some((x) => x.name === '队员B' && x.reason.includes('今日已预告'))
+      && dedup2.skipped.some((x) => x.name === '队员C' && x.reason.includes('今日已预告')),
     JSON.stringify({ sent: dedup2.sent, skipped: dedup2.skipped }));
   const d5DmCount = memory.dmCalls.filter((c) => c.text.includes('5 天后') && c.text.includes('值日预告')).length;
-  check('两枪合计：每人只收到一条预告（无重复轰炸）', d5DmCount === 2, `实际私信 ${d5DmCount} 条`);
+  check('两枪合计：每人只收到一条预告（无重复轰炸）', d5DmCount === 3, `实际私信 ${d5DmCount} 条`);
+  // 还原环境：d5Date 夹具记录全部删除（防污染后续周容量/安置用例）
+  await dutyTable.batchDeleteRecords((await dutyTable.getRecordsByDate(d5Date)).map((r) => r.recordId));
 
   // ---- 11. 当日中午提醒（2026-10-07 v46 新增：18:30 询问前唯一私信触点，提前开启监听会话） ----
   // 前序用例（打卡/收口/请假）可能已把今日班次置状态，先全部置已请假腾场再造一条干净班次

@@ -89,15 +89,55 @@ function aheadRemindKey(daysAhead) {
   return `${todayStr()}|${daysAhead}`;
 }
 
-/** 记「今日该域已成功预告」（只记发送成功者，失败不记留给下枪补）；顺手清非今日键防膨胀 */
-function markAheadReminded(key, openId) {
+// ---- 预告去重账本（v48f 定「每人每天每域一条」；v60 改占位-确认两段式）----
+// 值 true=已确认发出；值 'claimed'=已占位待发送。先占位再发送：发送成功后确认，
+// 发送失败即释放，下一槽位照常补发；同一成员的多条班次记录/重试/兜底槽位都会撞上
+// 占位而跳过。旧版「发完才记账」在记账缺失时（发送成功但标记未落）会被兜底槽位重发——
+// 2026-10-23 蒋梓来同一天收到两张 D-3 卡即此因。
+function sweepAheadKeys(s) {
+  const todayPrefix = `${todayStr()}|`;
+  s.aheadReminded = s.aheadReminded || {};
+  for (const k of Object.keys(s.aheadReminded)) {
+    if (!k.startsWith(todayPrefix)) delete s.aheadReminded[k]; // 只留今日键防膨胀
+  }
+}
+
+/** 每轮开始释放上次崩溃残留的未确认占位（claimed≠true），交由本轮照常补发 */
+function releaseStaleAheadClaims(key) {
   state.mutate((s) => {
-    const todayPrefix = `${todayStr()}|`;
-    s.aheadReminded = s.aheadReminded || {};
-    for (const k of Object.keys(s.aheadReminded)) {
-      if (!k.startsWith(todayPrefix)) delete s.aheadReminded[k];
+    sweepAheadKeys(s);
+    const slot = s.aheadReminded[key] || {};
+    for (const [openId, v] of Object.entries(slot)) {
+      if (v !== true) delete slot[openId];
     }
-    s.aheadReminded[key] = { ...(s.aheadReminded[key] || {}), [openId]: true };
+    s.aheadReminded[key] = slot;
+  });
+}
+
+/** 占位：未被占位/确认时写入 'claimed' 并返回 true；已占位（含已确认）返回 false */
+function claimAheadReminded(key, openId) {
+  let claimed = false;
+  state.mutate((s) => {
+    sweepAheadKeys(s);
+    s.aheadReminded[key] = s.aheadReminded[key] || {};
+    if (s.aheadReminded[key][openId]) return;
+    s.aheadReminded[key][openId] = 'claimed';
+    claimed = true;
+  });
+  return claimed;
+}
+
+/** 发送成功 → 确认（此后今日所有槽位跳过） */
+function confirmAheadReminded(key, openId) {
+  state.mutate((s) => {
+    if (s.aheadReminded[key]) s.aheadReminded[key][openId] = true;
+  });
+}
+
+/** 发送失败 → 释放占位（下一槽位照常补发） */
+function releaseAheadReminded(key, openId) {
+  state.mutate((s) => {
+    if (s.aheadReminded[key]) delete s.aheadReminded[key][openId];
   });
 }
 
@@ -107,11 +147,10 @@ async function sendAheadRemind(options = {}) {
     ? Math.trunc(Number(options.daysAhead))
     : 7;
   const date = addDays(todayStr(), daysAhead);
-  const whenText = daysAhead === 7 ? '一周后' : daysAhead === 3 ? '三天后' : `${daysAhead} 天后`;
   const recs = await dutyTable.getRecordsByDate(date);
 
   const remindedKey = aheadRemindKey(daysAhead);
-  const remindedToday = new Set(Object.keys((state.load().aheadReminded || {})[remindedKey] || {}));
+  if (!dryRun) releaseStaleAheadClaims(remindedKey);
 
   const sent = [];
   const skipped = [];
@@ -122,32 +161,41 @@ async function sendAheadRemind(options = {}) {
       skipped.push({ name: rec.name || '（未绑定）', reason: '未绑定账号' });
       continue;
     }
-    if (!dryRun && remindedToday.has(member.openId)) {
+    if (dryRun) {
+      const text = buildAheadText({ daysAhead, date, rec, member });
+      sent.push({ name: member.name, position: rec.position, preview: text });
+      continue;
+    }
+    // 占位即去重：同成员的多条记录/后续槽位/重试都撞占位跳过（先于文案构造，省 IO）
+    if (!claimAheadReminded(remindedKey, member.openId)) {
       skipped.push({ name: member.name, reason: '今日已预告（去重不重发）' });
       continue;
     }
-    const text = [
-      `📅 值日预告：${whenText}（${date}）是你的值日日，岗位【${rec.position}】`,
-      `职责：${positionDutyText(rec.position)}`,
-      '',
-      '提前留意当天的时间安排；如需请假，回复「我要请假」即可（请假当日该岗由同日队员兼顾，下周自动补一次值日）。',
-      ...(daysAhead <= 3 ? [`距离值日只剩 ${daysAhead} 天，时间有冲突请尽早请假，方便安排补偿。`] : []),
-    ].join('\n');
-    if (dryRun) {
-      sent.push({ name: member.name, position: rec.position, preview: text });
-    } else {
-      try {
-        await bot.sendTextToUser(member.openId, text);
-        sent.push({ name: member.name, position: rec.position });
-        markAheadReminded(remindedKey, member.openId);
-      } catch (err) {
-        skipped.push({ name: member.name, reason: `预告发送失败: ${err.message}` });
-        console.error(`[预告] ${member.name} 发送失败:`, err.message);
-      }
+    const text = buildAheadText({ daysAhead, date, rec, member });
+    try {
+      await bot.sendTextToUser(member.openId, text);
+      confirmAheadReminded(remindedKey, member.openId);
+      sent.push({ name: member.name, position: rec.position });
+    } catch (err) {
+      releaseAheadReminded(remindedKey, member.openId);
+      skipped.push({ name: member.name, reason: `预告发送失败: ${err.message}` });
+      console.error(`[预告] ${member.name} 发送失败:`, err.message);
     }
   }
 
   return { date, daysAhead, sent, skipped, preview: sent.map((s) => `${s.name}（${s.position}）`) };
+}
+
+/** D-3/D-7 预告文案（天数十越 3 走泛化措辞；≤3 附临期尽早请假提示） */
+function buildAheadText({ daysAhead, date, rec, member }) {
+  const whenText = daysAhead === 7 ? '一周后' : daysAhead === 3 ? '三天后' : `${daysAhead} 天后`;
+  return [
+    `📅 值日预告：${whenText}（${date}）是你的值日日，岗位【${rec.position}】`,
+    `职责：${positionDutyText(rec.position)}`,
+    '',
+    '提前留意当天的时间安排；如需请假，回复「我要请假」即可（请假当日该岗由同日队员兼顾，下周自动补一次值日）。',
+    ...(daysAhead <= 3 ? [`距离值日日只剩 ${daysAhead} 天，时间有冲突请尽早请假，方便安排补偿。`] : []),
+  ].join('\n');
 }
 
 /** 兼容旧入口：D-7 预告（flow 桩测试与 /api/bot/test-week-remind 手动接口沿用） */
