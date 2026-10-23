@@ -122,6 +122,17 @@ function resetStreak(memberName) {
 }
 
 /**
+ * 某日期的补偿插入名单（同步，读义务账本：placed 且 placedDate=该日期）。
+ * 看板卡/私信提醒用它给补偿插入标注「补偿」字样；cancelledObligations 不算。
+ * @param {string} dateStr
+ * @returns {Set<string>} 该日补偿插入的成员姓名集合
+ */
+function getInsertionNamesByDate(dateStr) {
+  const s = state.load();
+  return new Set((s.obligations || []).filter((o) => o.placed && o.placedDate === dateStr).map((o) => o.name));
+}
+
+/**
  * 尝试就地安置未安置的义务：目标周已有排班 → 插入；目标周还没生成 → 留队；
  * 目标周已生成但该队员周内天天有班 → 顺延下一周（2026-09-19，小队满周退化路径）。
  * 排班写链路全局串行（2026-09-27）：与 generate/rebalance 共用 withScheduleLock，
@@ -369,4 +380,4 @@ async function reconcile(options = {}) {
   return { dayStatusChanged, yesterdayStatus: target, backfilled, placed, stillQueued, deferred, expired, report };
 }
 
-module.exports = { handleAbsence, resetStreak, placePending, reconcile, syncAbsenceObligations };
+module.exports = { handleAbsence, resetStreak, getInsertionNamesByDate, placePending, reconcile, syncAbsenceObligations };

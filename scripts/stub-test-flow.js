@@ -504,6 +504,17 @@ function check(desc, cond, detail = '') {
   const second = await assistant.handleCommand({ command: '值日助手', openId: 'ou_test_a', chatType: 'group', chatId: 'oc_test' });
   check('群看板：发送 1 次卡，第二次命中限流静默', memory.cards.length === 1 && second.rateLimited === true);
 
+  // 看板补偿标记（2026-10-23）：义务账本 placed@今日 的成员在看板标「（补偿）」
+  state.mutate((st) => {
+    st.obligations.push({ id: 'ob_mark_test', name: '队员B', dutyDate: today, weekStart: today, reason: '未做完', placed: true, placedDate: today, placedFillLeave: false });
+  });
+  const markCard = assistant.buildBoardCard(today, await dutyTable.getRecordsByDate(today), null);
+  check('看板补偿标记：placed@今日 的队员B 标「（补偿）」，他人不标',
+    markCard.elements.some((e) => e.tag === 'markdown' && (e.content || '').includes('队员B（补偿）'))
+      && !(markCard.elements.some((e) => e.tag === 'markdown' && (e.content || '').includes('队员A（补偿）'))),
+    JSON.stringify(markCard.elements.map((e) => e.content || '').filter(Boolean)));
+  state.mutate((st) => { st.obligations = st.obligations.filter((o) => o.id !== 'ob_mark_test'); });
+
   // 收口回执通知（手动触发 = 不受静默限制，直接发送）；
   // 载荷走生产契约 missNotices（photos:true 命中「有照片未答是」专用文案）——
   // 旧 photoOnly 回退已删，photoOnly 元素无 photos 字段会发错文案
@@ -586,13 +597,20 @@ function check(desc, cond, detail = '') {
     if (!r.status) await dutyTable.setStatus(r.recordId, config.status.LEAVE);
   }
   await dutyTable.createDayRecords(todayStr(), [{ member: roster.findByName('队员C'), position: '装配区' }]);
+  state.mutate((st) => {
+    st.obligations.push({ id: 'ob_noon_mark', name: '队员C', dutyDate: todayStr(), weekStart: todayStr(), reason: '未做完', placed: true, placedDate: todayStr(), placedFillLeave: false });
+  });
   state.mutate((s) => { s.sessions = {}; });
   const noon = await inquiry.sendNoonRemind();
   check('中午提醒：恰好命中新建班次且私信发出',
     noon.date === todayStr() && noon.sent.length === 1 && noon.sent[0].name === '队员C'
       && memory.dmCalls.some((c) => c.openId === 'ou_test_c' && c.text.includes('中午提个醒')),
     JSON.stringify({ sent: noon.sent, skipped: noon.skipped }));
-  check('中午提醒：监听会话已提前开启（不等 18:30）',
+  check('中午提醒：补偿值日成员收到补偿说明行',
+    memory.dmCalls.some((c) => c.openId === 'ou_test_c' && c.text.includes('本次为补偿值日')),
+    JSON.stringify(memory.dmCalls.filter((c) => c.openId === 'ou_test_c').map((c) => c.text.slice(0, 60))));
+  state.mutate((st) => { st.obligations = st.obligations.filter((o) => o.id !== 'ob_noon_mark'); });
+    check('中午提醒：监听会话已提前开启（不等 18:30）',
     !!(state.load().sessions['ou_test_c'] || {}).recordId,
     JSON.stringify(state.load().sessions['ou_test_c'] || {}));
 

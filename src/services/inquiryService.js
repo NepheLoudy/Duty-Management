@@ -148,6 +148,7 @@ async function sendAheadRemind(options = {}) {
     : 7;
   const date = addDays(todayStr(), daysAhead);
   const recs = await dutyTable.getRecordsByDate(date);
+  const insertNames = compensation.getInsertionNamesByDate(date);
 
   const remindedKey = aheadRemindKey(daysAhead);
   if (!dryRun) releaseStaleAheadClaims(remindedKey);
@@ -162,7 +163,7 @@ async function sendAheadRemind(options = {}) {
       continue;
     }
     if (dryRun) {
-      const text = buildAheadText({ daysAhead, date, rec, member });
+      const text = buildAheadText({ daysAhead, date, rec, member, isInsert: insertNames.has(rec.name) });
       sent.push({ name: member.name, position: rec.position, preview: text });
       continue;
     }
@@ -171,7 +172,7 @@ async function sendAheadRemind(options = {}) {
       skipped.push({ name: member.name, reason: '今日已预告（去重不重发）' });
       continue;
     }
-    const text = buildAheadText({ daysAhead, date, rec, member });
+    const text = buildAheadText({ daysAhead, date, rec, member, isInsert: insertNames.has(rec.name) });
     try {
       await bot.sendTextToUser(member.openId, text);
       confirmAheadReminded(remindedKey, member.openId);
@@ -186,12 +187,13 @@ async function sendAheadRemind(options = {}) {
   return { date, daysAhead, sent, skipped, preview: sent.map((s) => `${s.name}（${s.position}）`) };
 }
 
-/** D-3/D-7 预告文案（天数十越 3 走泛化措辞；≤3 附临期尽早请假提示） */
-function buildAheadText({ daysAhead, date, rec, member }) {
+/** D-3/D-7 预告文案（天数十越 3 走泛化措辞；≤3 附临期尽早请假提示；补偿插入附说明） */
+function buildAheadText({ daysAhead, date, rec, member, isInsert }) {
   const whenText = daysAhead === 7 ? '一周后' : daysAhead === 3 ? '三天后' : `${daysAhead} 天后`;
   return [
     `📅 值日预告：${whenText}（${date}）是你的值日日，岗位【${rec.position}】`,
     `职责：${positionDutyText(rec.position)}`,
+    ...(isInsert ? ['ℹ️ 本次为补偿值日（此前缺勤的补充安排）。'] : []),
     '',
     '提前留意当天的时间安排；如需请假，回复「我要请假」即可（请假当日该岗由同日队员兼顾，下周自动补一次值日）。',
     ...(daysAhead <= 3 ? [`距离值日日只剩 ${daysAhead} 天，时间有冲突请尽早请假，方便安排补偿。`] : []),
@@ -214,6 +216,7 @@ async function sendNoonRemind(options = {}) {
   const dryRun = Boolean(options.dryRun);
   const date = todayStr();
   const recs = await dutyTable.getRecordsByDate(date);
+  const insertNames = compensation.getInsertionNamesByDate(date);
 
   const sent = [];
   const skipped = [];
@@ -227,6 +230,7 @@ async function sendNoonRemind(options = {}) {
     const text = [
       `🧹 中午提个醒：今天（${date}）是你的值日日，岗位【${rec.position}】`,
       `职责：${positionDutyText(rec.position)}`,
+      ...(insertNames.has(rec.name) ? ['ℹ️ 本次为补偿值日（此前缺勤的补充安排）。'] : []),
       '',
       '下午完工后回复「打卡」并上传现场照片（照片会写入值日表对应岗位栏），现在起即可打卡。',
       '18:30 会再私信确认；值日验收到次日凌晨 4:00（今晚 24:00 后仍可打卡），逾期未打卡记「未做完」。想请假回复「我要请假」。',
@@ -264,6 +268,7 @@ async function askToday(options = {}) {
   const dryRun = Boolean(options.dryRun);
   const date = todayStr();
   const recs = await dutyTable.getRecordsByDate(date);
+  const insertNames = compensation.getInsertionNamesByDate(date);
 
   const asked = [];
   const skipped = [];
@@ -277,6 +282,7 @@ async function askToday(options = {}) {
     const lines = [
       `🧹 今天（${date}）值日完成了吗？你的岗位是【${rec.position}】`,
       `职责：${positionDutyText(rec.position)}`,
+      ...(insertNames.has(rec.name) ? ['ℹ️ 本次为补偿值日（此前缺勤的补充安排）。'] : []),
       '',
       '完成后请回复「打卡」完成值日打卡，并上传现场照片（照片会写入值日表对应岗位栏）。',
       '值日验收到次日凌晨 4:00（今晚 24:00 后仍可打卡），逾期未打卡会记为「未做完」；想请假回复「我要请假」。',
@@ -420,6 +426,7 @@ async function sendLastCall(options = {}) {
   // 23:00 触发时 dutyDateStr()=今天；容错延迟触发（跨零点后仍定位值日当天 D）
   const date = dutyDateStr();
   const recs = await dutyTable.getRecordsByDate(date);
+  const insertNames = compensation.getInsertionNamesByDate(date);
 
   const sent = [];
   const skipped = [];
@@ -437,6 +444,7 @@ async function sendLastCall(options = {}) {
         ? '照片已收到 ✅，回复「打卡」即完成值日。'
         : '完成后回复「打卡」并上传现场照片（照片会写入值日表）；今晚做不完也可以凌晨补打卡。',
       '确实做不完：回复「我要请假」，或验收后记「未做完」（下周自动补偿一次）。查询排班发「值日助手」。',
+      ...(insertNames.has(rec.name) ? ['ℹ️ 本次为补偿值日（此前缺勤的补充安排）。'] : []),
     ];
     const text = lines.join('\n');
     if (dryRun) {
