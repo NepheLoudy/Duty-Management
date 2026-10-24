@@ -32,12 +32,18 @@ function newId() {
  * 加罚（2026-10-07 v47 口径，曼波定）：请假与未做完共用同一条连续计数——连续两次
  * 「已请假」或「未做完」（含混合）触发加罚 +1 条义务，计数清零；完成 1 次值日即清零
  * （resetStreak）。每次缺勤本身仍各登记 1 条补偿（总量守恒不变），加罚是额外代价。
+ * 白名单成员不登记（2026-10-24：白名单=值日豁免名单，登记了也无法安置、清了会再生）。
  * @param {string} memberName
  * @param {string} dutyDateStr 缺勤那次值日的日期（义务插到其所在自然周的下一周）
  * @param {string} reason 已请假 / 未做完
  * @returns {{created: Array, penalty: boolean, streak: number}}
  */
 function handleAbsence(memberName, dutyDateStr, reason) {
+  const whitelist = new Set(roster.loadWhitelistNames());
+  if (whitelist.has(memberName)) {
+    console.log(`[补偿] ${memberName} 在白名单，跳过义务登记（${reason} @${dutyDateStr}）`);
+    return { created: [], penalty: false, streak: 0 };
+  }
   const weekStart = addDays(mondayOf(dutyDateStr), 7);
   return state.mutate((s) => {
     const created = [{
@@ -84,6 +90,7 @@ function handleAbsence(memberName, dutyDateStr, reason) {
  */
 function syncAbsenceObligations(dutyDateStr, records) {
   const weekStart = addDays(mondayOf(dutyDateStr), 7);
+  const whitelist = new Set(roster.loadWhitelistNames());
   const absent = records.filter(
     (r) => r.name && (r.status === config.status.LEAVE || r.status === config.status.MISS)
   );
@@ -92,6 +99,7 @@ function syncAbsenceObligations(dutyDateStr, records) {
   return state.mutate((s) => {
     let created = 0;
     for (const rec of absent) {
+      if (whitelist.has(rec.name)) continue; // 白名单成员不登记（清了会由这里再生，2026-10-24）
       const exists = (s.obligations || []).some(
         // 旧版义务没有 dutyDate 字段：按 姓名+原因 宽松匹配，避免重复登记
         (o) => o.name === rec.name && (o.dutyDate === undefined || o.dutyDate === dutyDateStr) && o.reason.startsWith(rec.status)

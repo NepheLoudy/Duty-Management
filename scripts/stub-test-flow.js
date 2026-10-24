@@ -526,6 +526,21 @@ function check(desc, cond, detail = '') {
   check('brief：昨日 1 人（对账补的记录）、今日 3 人', brief.yesterday.members.length === 1 && brief.today.members.length === 3, JSON.stringify(brief.today));
   check('brief：昨日 dayStatus=null（未完成口径）', brief.yesterday.dayStatus === null);
 
+  // ---- 9.5 白名单成员不登记补偿义务（2026-10-24：handleAbsence/syncAbsence 双入口跳过） ----
+  {
+    const wlBefore = state.load().obligations.length;
+    roster.updateWhitelist({ add: ['队员C'] });
+    const wlSkip = compensation.handleAbsence('队员C', addDays(today, -1), config.status.MISS);
+    check('白名单成员 handleAbsence 跳过登记',
+      wlSkip.created.length === 0 && state.load().obligations.length === wlBefore,
+      JSON.stringify({ created: wlSkip.created, before: wlBefore, after: state.load().obligations.length }));
+    const wlSync = compensation.syncAbsenceObligations(addDays(today, -1), [{ name: '队员C', status: config.status.MISS }]);
+    check('白名单成员 syncAbsenceObligations 跳过登记',
+      wlSync === 0 && state.load().obligations.length === wlBefore,
+      JSON.stringify({ synced: wlSync }));
+    roster.updateWhitelist({ remove: ['队员C'] }); // 还原白名单（原=队员E）
+  }
+
   // ---- 10. 提前预告（D-7 / D-3，2026-10-07 v45 起双锚点、每天 3 次） ----
   const weekAhead = await inquiry.sendWeekAheadRemind({ dryRun: true });
   check('D-7 预告：目标日=今天+7、daysAhead=7 且有班次可发',
