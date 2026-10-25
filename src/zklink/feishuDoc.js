@@ -278,6 +278,13 @@ function buildDocBlocks(win, agg, records, extra = {}) {
   return blocks;
 }
 
+/** 留档链接（v63：播报卡只发链接，明细在按周留档里）——wiki 节点链接，队员点开即达 */
+function archiveLink() {
+  if (!config.archiveDocToken) return '';
+  const base = config.archiveLinkBase || 'https://cquqianli.feishu.cn';
+  return `${base}/wiki/${config.archiveDocToken}`;
+}
+
 // 追加到云文档末尾（自动解析 wiki 节点）；返回追加块数。
 // objType=bitable 时走多维表格归档（2026-10-12 曼波定：归档落点=「打卡记录」bitable，
 // 按人每周一行——docx 分支从未成功落档过，bitable 是首个真归档形态）。
@@ -292,4 +299,4 @@ async function archiveToDoc(win, agg, records, extra = {}) {
   return { appended, objToken: resolved.objToken, objType: resolved.objType };
 }
 
-module.exports = { archiveLocal, buildDocBlocks, archiveToDoc, archiveToBitable, resolveDocToken, resolveArchiveFields, weekNumberOf, textBlock, headingBlock, appendDocBlocks };
+module.exports = { archiveLocal, buildDocBlocks, archiveToDoc, archiveToBitable, resolveDocToken, resolveArchiveFields, weekNumberOf, archiveLink, textBlock, headingBlock, appendDocBlocks };

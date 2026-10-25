@@ -1,4 +1,5 @@
 // 打卡周报卡 + docx 块构造桩测试（归并版：发送走 ../feishu/webhook.js 不在本模块重测）
+// v63 短卡口径：合计 + 留档链接，不再刷逐人名单；docx 块构造（留档明细）不受影响
 // 运行：node scripts/stub-test-zklink-card.js
 const assert = require('assert');
 const card = require('../src/zklink/card');
@@ -20,18 +21,21 @@ const records = [
 ];
 const agg = report.aggregateDuration(records, [{ userid: 'zhangsan', name: '张三' }]);
 
-console.log('\n== 1. 周报卡片 ==');
-const cardOrange = card.buildWeeklyCard(win, agg);
+console.log('\n== 1. 周报短卡（v63：合计 + 留档链接，无逐人名单） ==');
+const cardOrange = card.buildWeeklyCard(win, agg, { archiveLink: 'https://cquqianli.feishu.cn/wiki/TESTNODE' });
 check('有孤条 → orange 头', cardOrange.header.template === 'orange', cardOrange.header.template);
 check('标题含周窗口', cardOrange.header.title.content.includes('2026-09-14 ~ 2026-09-20'), cardOrange.header.title.content);
 check('汇总行含总时长', cardOrange.elements[0].content.includes('9小时7分钟'), cardOrange.elements[0].content);
-check('孤条入卡片', cardOrange.elements[0].content.includes('孤条 1 天'), cardOrange.elements[0].content);
+check('孤条入汇总行', cardOrange.elements[0].content.includes('孤条 1 天'), cardOrange.elements[0].content);
+check('卡片含留档链接', cardOrange.elements.some((e) => (e.content || '').includes('https://cquqianli.feishu.cn/wiki/TESTNODE') && e.content.includes('按周')), JSON.stringify(cardOrange.elements.map((e) => e.content)));
+check('卡片不再刷逐人名单（v63）', !cardOrange.elements.some((e) => (e.content || '').includes('**张三**：')), JSON.stringify(cardOrange.elements.map((e) => e.content)));
+check('卡片结构=汇总/链接/口径 4 元素', cardOrange.elements.length === 4, String(cardOrange.elements.length));
 const aggClean = report.aggregateDuration(records.slice(0, 2), [{ userid: 'zhangsan', name: '张三' }]);
-check('全勤 → green 头', card.buildWeeklyCard(win, aggClean).header.template === 'green');
+check('全勤 → green 头', card.buildWeeklyCard(win, aggClean, {}).header.template === 'green');
 const aggEmpty = report.aggregateDuration([], [{ userid: 'zhangsan', name: '张三' }]);
-check('空数据 → 提示检查导出', card.buildWeeklyCard(win, aggEmpty).elements[2].content.includes('无打卡记录'));
+check('空数据 → 提示检查导出', card.buildWeeklyCard(win, aggEmpty, {}).elements[0].content.includes('无打卡记录'));
 
-console.log('\n== 2. docx 块构造 ==');
+console.log('\n== 2. docx 块构造（留档明细，与卡片解耦） ==');
 const tb = feishuDoc.textBlock('hello');
 check('文本块 block_type=2', tb.block_type === 2 && tb.text.elements[0].text_run.content === 'hello');
 const hb = feishuDoc.headingBlock(2, '标题');

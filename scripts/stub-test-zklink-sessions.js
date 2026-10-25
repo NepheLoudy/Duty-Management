@@ -69,7 +69,7 @@ const min = (n) => n * 60000;
   const c = card.buildWeeklyCard(win, agg);
   check('有缺卡 → orange 头', c.header.template === 'orange', c.header.template);
   check('汇总行=有效班次+缺卡', c.elements[0].content.includes('有效班次 3 段') && c.elements[0].content.includes('缺卡 1 段'), c.elements[0].content);
-  check('卡口径=06:00 切天', c.elements[4].content.includes('06:00') && c.elements[4].content.includes('平台上下班配对'), c.elements[4].content);
+  check('卡口径=06:00 切天', c.elements[3].content.includes('06:00') && c.elements[3].content.includes('平台上下班配对'), c.elements[3].content);
   const blocks = feishuDoc.buildDocBlocks(win, agg, sessions, { dataSource: 'feishu' });
   check('文档口径含平台配对/06:00', blocks.some((b) => b.text && b.text.elements[0].text_run.content.includes('平台上下班配对') && b.text.elements[0].text_run.content.includes('06:00')));
   check('文档汇总=有效班次', blocks.some((b) => b.text && b.text.elements[0].text_run.content.includes('有效班次 3 段')));

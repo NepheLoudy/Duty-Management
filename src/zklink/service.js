@@ -116,7 +116,8 @@ async function runWeekly({ offset = 0, dryRun = false, trigger = 'cron' } = {}) 
   const done = st.delivery && st.delivery.weekKey === win.key ? st.delivery : { weekKey: win.key };
   const failed = [];
 
-  // ---- 云文档留档通道（未配置=skipped 不重试，本地 archive/ 已兜底）----
+  // ---- 留档先行（v63，2026-10-26 曼波定）：数据先落「打卡记录」（按周），成功后才发
+  // 链接卡——归档失败时不发卡（链接指向的库里没数据），交重试链/watchdog 补跑 ----
   if (done.archived !== true) {
     // 2026-10-10 修复：原写 config.feishuAppConfigured（zklink config 只导出
     // appConfigured）恒 undefined → 门控永远走 skipped，云文档留档从未执行
@@ -125,7 +126,7 @@ async function runWeekly({ offset = 0, dryRun = false, trigger = 'cron' } = {}) 
         const r = await feishuDoc.archiveToDoc(win, agg, records, { dataSource: config.dataSource });
         done.archived = true;
         done.archivedBlocks = r.appended;
-        console.log(`[打卡周报] 云文档留档完成：追加 ${r.appended} 块（obj_type=${r.objType || '?'}）`);
+        console.log(`[打卡周报] 留档完成：${r.appended} 行/块（obj_type=${r.objType || '?'}）`);
       } catch (e) {
         failed.push(`云文档留档: ${e.message}${e.hint ? `（${e.hint}）` : ''}`);
       }
@@ -135,10 +136,11 @@ async function runWeekly({ offset = 0, dryRun = false, trigger = 'cron' } = {}) 
     }
   }
 
-  // ---- 周报卡：值日群 webhook ----
-  if (done.feishu !== true) {
+  // ---- 周报卡：短卡（合计 + 留档链接，v63 起不再刷逐人名单）----
+  const archiveReady = done.archived === true || done.archived === 'skipped';
+  if (archiveReady && done.feishu !== true) {
     try {
-      await sendCardToWebhook(config.webhookUrl, config.webhookSecret, card.buildWeeklyCard(win, agg));
+      await sendCardToWebhook(config.webhookUrl, config.webhookSecret, card.buildWeeklyCard(win, agg, { archiveLink: feishuDoc.archiveLink() }));
       done.feishu = true;
     } catch (e) {
       failed.push(`飞书: ${e.message}`);

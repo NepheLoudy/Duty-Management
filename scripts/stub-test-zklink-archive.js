@@ -41,6 +41,7 @@ const stubs = {
   [path.join(ROOT, 'src/zklink/feishuDoc.js')]: {
     archiveLocal: () => { calls.archiveLocal++; },
     archiveToDoc: async () => { calls.archiveToDoc++; return { appended: 3, objType: 'docx' }; },
+    archiveLink: () => 'https://cquqianli.feishu.cn/wiki/STUB',
   },
   [path.join(ROOT, 'src/zklink/card.js')]: {
     buildWeeklyCard: () => ({ stub: 'weekly-card' }),

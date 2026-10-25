@@ -361,6 +361,7 @@ function check(desc, cond, detail = '') {
     check('加罚口径：加罚后 streak 清零', (state.load().absenceStreaks['队员B'] || { count: -1 }).count === 0);
     const m2 = compensation.handleAbsence('队员X', addDays(today, -1), '未做完');
     check('加罚口径：首次未做完只算第1次', m2.created.length === 1 && !m2.penalty && m2.streak === 1, JSON.stringify(m2));
+    state.mutate((st) => { st.obligations = st.obligations.filter((o) => o.name !== '队员X'); }); // 清理测试义务（周初=本周时会被安置进今天，污染 brief 断言）
 
     // 请假空缺位优先（2026-09-25 检修）：planInsertion 对带 status 的快照优先填已请假空缺岗
     {

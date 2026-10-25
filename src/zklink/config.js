@@ -66,6 +66,8 @@ const config = {
   // 多维表格归档（2026-10-12 曼波定：归档落点=wiki「打卡记录」bitable，按人每周一行——
   // wiki 节点解析出 objType=bitable 时自动走表格分支，无需额外开关）
   archiveTableId: process.env.ZKLINK_ARCHIVE_TABLE_ID || '',
+  // 留档链接域名前缀（v63：播报卡只发链接不发长名单；默认 cquqianli 租户，可 env 覆盖）
+  archiveLinkBase: process.env.ZKLINK_ARCHIVE_LINK_BASE || '',
   // 学期第 1 周周一（YYYY-MM-DD）——归档「第几周」列起算锚点（2026-10-12 曼波定：当日为第 6 周 → 起点 2026-09-14）
   week1Start: process.env.ZKLINK_WEEK1_START || '',
   // 周时长及格线（小时，正数）——归档「是否及格」列判定；未配置/0=不写该列（口径待曼波，系统较复杂）
