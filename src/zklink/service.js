@@ -23,6 +23,7 @@ const { sendCardToWebhook } = require('../feishu/webhook');
 const feishuDoc = require('./feishuDoc');
 const card = require('./card');
 const importService = require('./importService');
+const roster = require('../services/rosterService');
 
 let running = false;
 
@@ -56,11 +57,25 @@ async function runWeekly({ offset = 0, dryRun = false, trigger = 'cron' } = {}) 
     // 飞书考勤档（2026-10-18 曼波定：平台上下班配对才是准的）
     // 数据源从打卡流水 user_flows 切到打卡结果 user_tasks：平台按班次配好上下班卡，
     // 工作日 06:00–次日 05:59 切天，跨天班次挂在起始日，同一天多个班段逐段返回。
-    const r = await feishuAttendance.fetchTaskSessions(win.start, win.end);
+    //
+    // 名单补齐（v64，2026-10-26 曼波定）：考勤组真实成员不可读，通讯录里**不在值日白名单**
+    // 的人都要进周报——用户组只挂 22 人、梯队部门 48 人，电控组/机械组等非白名单成员会
+    // 整个漏掉（莫雨衡本周满勤却不在表里实锤）。白名单成员不补，避免一排 0 时长噪音。
+    let extraMembers = [];
+    try {
+      const users = await feishuAttendance.listUsersWithUserId();
+      const whitelist = new Set(roster.loadWhitelistNames());
+      extraMembers = users.filter((u) => !whitelist.has(u.name));
+      console.log(`[打卡周报] 通讯录补齐：通讯录 ${users.length} 人 − 白名单 ${users.length - extraMembers.length} 人 → 并入 ${extraMembers.length} 人`);
+    } catch (e) {
+      console.warn(`[打卡周报] 通讯录补齐名单失败（${e.message}），按考勤组/用户组名单继续`);
+    }
+    const r = await feishuAttendance.fetchTaskSessions(win.start, win.end, { extraMembers });
     records = r.sessions;
     if (r.invalidUserIds.length || r.unauthorizedUserIds.length) {
       console.warn(`[打卡周报] 打卡结果名单异常：无效 ${r.invalidUserIds.length} 人、无权限 ${r.unauthorizedUserIds.length} 人`);
     }
+    members = importService.mergeMembers(members, extraMembers);
     // 考勤组规则（曼波 2026-10-08 定）：周报名单以考勤组成员为准——没打卡的人 0 时长
     // 也要出现（aggregateSessions 对名单内零记录者列 0 天）。取不到时回落通讯录全员
     // （仍强于只按打卡记录派生——那会让没人打卡的周整体消失），不炸周报。
@@ -126,7 +141,7 @@ async function runWeekly({ offset = 0, dryRun = false, trigger = 'cron' } = {}) 
         const r = await feishuDoc.archiveToDoc(win, agg, records, { dataSource: config.dataSource });
         done.archived = true;
         done.archivedBlocks = r.appended;
-        console.log(`[打卡周报] 留档完成：${r.appended} 行/块（obj_type=${r.objType || '?'}）`);
+        console.log(`[打卡周报] 留档完成：新增 ${r.appended} 行/块、更新 ${r.updated || 0} 行（obj_type=${r.objType || '?'}）`);
       } catch (e) {
         failed.push(`云文档留档: ${e.message}${e.hint ? `（${e.hint}）` : ''}`);
       }

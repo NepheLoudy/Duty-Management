@@ -121,17 +121,18 @@ async function resolveArchiveFields(appToken, tableId) {
 }
 
 // 通讯录全量 user_id→open_id（GET /contact/v3/users 老端点全树遍历；find_by_department 新端点
-// 只见 13 人且部门接口 99992357——2026-10-12 实测）。用户 department_ids 反向发现子部门。
+// 只见 13 人且部门接口 99992357——2026-10-12 实测）。部门发现走 children 路径式接口：
+// 根部门 users 列表恒为空，靠用户 department_ids 反向发现拉不到人（2026-10-26 修复）。
 async function fetchOpenIdMap() {
   const token = await getTenantAccessToken();
   const map = {};
   const depts = ['0'];
-  const seen = new Set();
+  const seen = new Set(['dept:0']);
   while (depts.length) {
     const d = depts.shift();
     let pageToken = '';
     do {
-      const qs = new URLSearchParams({ department_id: d, user_id_type: 'user_id', page_size: '50' });
+      const qs = new URLSearchParams({ department_id: d, department_id_type: 'department_id', user_id_type: 'user_id', page_size: '50' });
       if (pageToken) qs.set('page_token', pageToken);
       const res = await fetch(`${OPEN_API}/contact/v3/users?${qs}`, {
         signal: AbortSignal.timeout(20000),
@@ -141,10 +142,20 @@ async function fetchOpenIdMap() {
       if (j.code !== 0) { console.warn(`[打卡留档] 通讯录部门 ${d} 拉取失败（${j.code} ${j.msg || ''}），跳过`); break; }
       for (const p of (j.data && j.data.items) || []) {
         if (p.user_id && p.open_id && !map[p.user_id]) map[p.user_id] = p.open_id;
-        for (const dd of (p.department_ids || [])) if (!seen.has(dd)) { seen.add(dd); depts.push(dd); }
+        for (const dd of (p.department_ids || [])) if (!seen.has('dept:' + dd)) { seen.add('dept:' + dd); depts.push(dd); }
       }
       pageToken = (j.data && j.data.page_token) || '';
     } while (pageToken);
+    try {
+      const cr = await fetch(`${OPEN_API}/contact/v3/departments/${encodeURIComponent(d)}/children?department_id_type=department_id&user_id_type=user_id&page_size=50`, {
+        signal: AbortSignal.timeout(20000),
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const cj = await cr.json();
+      for (const cd of ((cj.data && cj.data.items) || [])) {
+        if (cd.department_id && !seen.has('dept:' + cd.department_id)) { seen.add('dept:' + cd.department_id); depts.push(cd.department_id); }
+      }
+    } catch (e) { /* 子部门发现失败不阻塞 */ }
   }
   return map;
 }
@@ -160,10 +171,25 @@ function weekNumberOf(win) {
 
 // 已有同周行则跳过（幂等：重试/手动重跑不重复写行）。
 // 注意 records 接口返回的 fields 键=字段名（非 field_id），按名匹配。
-async function bitableWeekExists(appToken, tableId, weekFieldName, weekNum) {
-  if (weekNum == null || !weekFieldName) return false;
-  const data = await bitableCall(appToken, `${tableId}/records?page_size=500`);
-  return ((data.items || []).some((r) => Number(r.fields && r.fields[weekFieldName]) === weekNum));
+// 2026-10-26 起整周跳过改为按人 upsert（见 archiveToBitable）：名单修正后也要能补人。
+async function listRecordsPaged(appToken, tableId) {
+  const items = [];
+  let pageToken = '';
+  do {
+    const qs = new URLSearchParams({ page_size: '500' });
+    if (pageToken) qs.set('page_token', pageToken);
+    const data = await bitableCall(appToken, `${tableId}/records?${qs}`);
+    items.push(...(data.items || []));
+    pageToken = data.has_more ? (data.page_token || '') : '';
+  } while (pageToken);
+  return items;
+}
+
+// 人员列取值（bitable User 字段返回 [{id,name,en_name,email}]）
+function personCell(fields, fieldName) {
+  const arr = fields && Array.isArray(fields[fieldName]) ? fields[fieldName] : [];
+  const first = arr[0] || {};
+  return { id: first.id ? String(first.id) : '', name: first.name || first.en_name || '' };
 }
 
 async function archiveToBitable(win, agg, appToken) {
@@ -175,35 +201,64 @@ async function archiveToBitable(win, agg, appToken) {
   }
   const fields = await resolveArchiveFields(appToken, tableId);
   const weekNum = weekNumberOf(win);
-  if (await bitableWeekExists(appToken, tableId, fields.week && fields.week.field_name, weekNum)) {
-    console.log(`[打卡留档] 多维表格已有第 ${weekNum} 周行，跳过重复归档`);
-    return { appended: 0, tableId, skipped: true };
+  const weekField = fields.week ? fields.week.field_name : '';
+  const userField = fields.user.field_name;
+  const durField = fields.duration.field_name;
+
+  // 同周已有行按人比对（2026-10-26 曼波定）：原「同周有行即整周跳过」让名单修正无法补写
+  //（第 7 周 70 行缺 2 人实锤）。现在按人员列 open_id（无则姓名）幂等 upsert：
+  // 缺的人补建、时长/及格变化的行批量更新，其余不动。
+  const existing = weekNum == null || !weekField
+    ? []
+    : (await listRecordsPaged(appToken, tableId)).filter((r) => Number(r.fields && r.fields[weekField]) === weekNum);
+  const byOpenId = new Map();
+  const byName = new Map();
+  for (const r of existing) {
+    const p = personCell(r.fields, userField);
+    if (p.id && !byOpenId.has(p.id)) byOpenId.set(p.id, r);
+    if (p.name && !byName.has(p.name)) byName.set(p.name, r);
   }
 
   const openIdMap = await fetchOpenIdMap(); // 名单不带 openId 时的兜底映射
-  const rows = [];
+  const creates = [];
+  const updates = [];
   const noOpenId = [];
   for (const u of agg.users) {
+    const oid = u.openId || openIdMap[u.userid] || '';
+    if (!oid) noOpenId.push(u.name);
     const fieldsBody = {};
-    const oid = u.openId || openIdMap[u.userid];
-    if (oid) fieldsBody[fields.user.field_name] = [{ id: oid }];
-    else noOpenId.push(u.name);
-    fieldsBody[fields.duration.field_name] = report.fmtDuration(u.totalMs);
+    if (oid) fieldsBody[userField] = [{ id: oid }];
+    fieldsBody[durField] = report.fmtDuration(u.totalMs);
     if (fields.pass && config.passHours > 0) fieldsBody[fields.pass.field_name] = u.totalMs >= config.passHours * 3600 * 1000;
-    if (fields.week && weekNum != null) fieldsBody[fields.week.field_name] = weekNum;
-    rows.push({ fields: fieldsBody });
+    if (weekField && weekNum != null) fieldsBody[weekField] = weekNum;
+
+    const hit = (oid && byOpenId.get(oid)) || byName.get(u.name) || null;
+    if (!hit) { creates.push({ fields: fieldsBody }); continue; }
+    const patch = {};
+    if (String((hit.fields || {})[durField] || '') !== fieldsBody[durField]) patch[durField] = fieldsBody[durField];
+    if (fields.pass && config.passHours > 0 && (hit.fields || {})[fields.pass.field_name] !== fieldsBody[fields.pass.field_name]) {
+      patch[fields.pass.field_name] = fieldsBody[fields.pass.field_name];
+    }
+    const hp = personCell(hit.fields, userField);
+    if (oid && !hp.id) patch[userField] = [{ id: oid }]; // 老行人员列留空（可见范围外）→ 补全
+    if (Object.keys(patch).length) updates.push({ record_id: hit.record_id, fields: patch });
   }
   if (noOpenId.length) console.warn(`[打卡留档] ${noOpenId.length} 人不在通讯录可见范围、人员列留空：${noOpenId.join('、')}（名单源修复后可重置归档水位补全）`);
 
-  let appended = 0;
-  for (let i = 0; i < rows.length; i += 500) {
+  for (let i = 0; i < creates.length; i += 500) {
     await bitableCall(appToken, `${tableId}/records/batch_create`, {
       method: 'POST',
-      body: JSON.stringify({ records: rows.slice(i, i + 500) }),
+      body: JSON.stringify({ records: creates.slice(i, i + 500) }),
     });
-    appended += Math.min(500, rows.length - i);
   }
-  return { appended, tableId };
+  for (let i = 0; i < updates.length; i += 500) {
+    await bitableCall(appToken, `${tableId}/records/batch_update`, {
+      method: 'POST',
+      body: JSON.stringify({ records: updates.slice(i, i + 500) }),
+    });
+  }
+  if (!creates.length && !updates.length) console.log(`[打卡留档] 第 ${weekNum} 周 ${existing.length} 行已是最新，无写入`);
+  return { appended: creates.length, updated: updates.length, tableId, skipped: !creates.length && !updates.length };
 }
 
 // 本地留档（JSON 全量 + CSV 日明细）；失败仅 warn 不阻塞播报
@@ -292,7 +347,7 @@ async function archiveToDoc(win, agg, records, extra = {}) {
   const resolved = await resolveDocToken(config.archiveDocToken);
   if (resolved.objType === 'bitable') {
     const r = await archiveToBitable(win, agg, resolved.objToken);
-    return { appended: r.appended, objToken: resolved.objToken, objType: resolved.objType, tableId: r.tableId, skipped: !!r.skipped };
+    return { appended: r.appended, updated: r.updated || 0, objToken: resolved.objToken, objType: resolved.objType, tableId: r.tableId, skipped: !!r.skipped };
   }
   const blocks = buildDocBlocks(win, agg, records, extra);
   const appended = await appendDocBlocks(resolved.objToken, blocks);

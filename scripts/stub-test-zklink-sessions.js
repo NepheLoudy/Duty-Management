@@ -122,6 +122,16 @@ const min = (n) => n * 60000;
   check('加班段跨天 15h 且计入起始日', s4 && s4.task_shift_type === 1 && s4.cross_day === true && s4.durationMs === min(900), JSON.stringify(s4));
   check('名单统计/无效名单透传', r.userCount === 2 && r.invalidUserIds.join(',') === 'bad1', JSON.stringify({ users: r.userCount, invalid: r.invalidUserIds }));
 
+  console.log('\n== 3b. extraMembers 并入查询名单（通讯录补齐，2026-10-26） ==');
+  calls.length = 0;
+  const r2 = await att.fetchTaskSessions(Date.parse('2026-10-12T00:00:00+08:00'), Date.parse('2026-10-19T00:00:00+08:00'), {
+    extraMembers: [{ userid: 'u1', name: '张三' }, { userid: 'u3', name: '王五' }, { userid: '', name: '脏数据' }],
+  });
+  const call2 = calls.find((x) => x.url.includes('user_tasks/query'));
+  check('补齐成员入查询且按 userid 去重/过滤空 id', call2.body.user_ids.join(',') === 'u1,u2,u3', JSON.stringify(call2.body.user_ids));
+  check('userCount 计入补齐成员', r2.userCount === 3, String(r2.userCount));
+  check('补齐成员仍走同一批归一化', r2.sessions.length === 4, String(r2.sessions.length));
+
   console.log(`\n结果：${pass} 通过 / ${fail} 失败`);
   process.exit(fail === 0 ? 0 : 1);
 })().catch((e) => { console.error(e); process.exit(1); });

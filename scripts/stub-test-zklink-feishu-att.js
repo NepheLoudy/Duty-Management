@@ -89,6 +89,31 @@ function check(name, cond, extra = '') {
   check('子部门 od_sub1 真被遍历', visitedDepts.has('od_sub1'), [...visitedDepts].join(','));
   check('姓名映射：u_abc → 张三', r2.records[0]._name === '张三', r2.records[0]._name);
 
+  console.log('\n== 2b. 通讯录全员：根部门 users 恒空，靠 children 发现子部门（2026-10-26 修复） ==');
+  let childCalls = 0;
+  global.fetch = async (url) => {
+    const u = String(url);
+    if (u.includes('tenant_access_token')) return { json: async () => ({ code: 0, tenant_access_token: 't-2b', expire: 7200 }) };
+    if (u.includes('/departments/0/children')) {
+      childCalls++;
+      return { json: async () => ({ code: 0, data: { items: [{ department_id: 'od_child', name: '子部门' }] } }) };
+    }
+    if (u.includes('/departments/od_child/children')) return { json: async () => ({ code: 0, data: { items: [] } }) };
+    if (u.includes('/contact/v3/users') && u.includes('department_id=od_child')) {
+      return { json: async () => ({ code: 0, data: { items: [
+        { user_id: 'u_child', name: '王五', open_id: 'ou_child', department_ids: [] },
+      ] } }) };
+    }
+    if (u.includes('/contact/v3/users') && u.includes('department_id=0')) {
+      return { json: async () => ({ code: 0, data: { items: [] } }) }; // 真实形态：根部门直挂 0 人
+    }
+    return { json: async () => ({ code: 1, msg: `unexpected ${u}` }) };
+  };
+  const all2b = await att2.listUsersWithUserId();
+  check('根部门空 → children 递归拉到子部门成员', all2b.length === 1 && all2b[0].userid === 'u_child' && all2b[0].name === '王五', JSON.stringify(all2b));
+  check('全员名单带 open_id（归档人员列用）', all2b[0].openId === 'ou_child', JSON.stringify(all2b[0]));
+  check('children 真被调用', childCalls === 1, String(childCalls));
+
   console.log('\n== 3. listGroups 形态 ==');
   global.fetch = async (url) => {
     const u = String(url);

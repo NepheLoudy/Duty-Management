@@ -37,18 +37,20 @@ function feishuAttError(code, msg) {
   return err;
 }
 
-// 通讯录全员（user_id 类型标识 + 姓名）——供流水 user_ids 与姓名映射
-// （contacts.js listAllUsers 同款遍历，但取 user_id_type=user_id；需 contact employee_id 权限）
+// 通讯录全员（user_id 类型标识 + 姓名 + open_id）——供流水 user_ids、姓名映射与归档人员列
+// 部门发现必须走 /departments/{id}/children 路径式接口（2026-10-26 修复）：根部门
+// department_id=0 的 users 列表恒为空（实测），旧实现靠用户 department_ids 反向发现，
+// 根部门拉不到人就永远发现不了任何子部门 → 返回 0 人（通讯录回落一直失效）。
 async function listUsersWithUserId() {
   const token = await getTenantAccessToken();
   const depts = ['0'];
   const users = [];
-  const seen = new Set();
+  const seen = new Set(['dept:0']);
   while (depts.length) {
     const deptId = depts.shift();
     let pageToken = '';
     do {
-      const qs = new URLSearchParams({ department_id: deptId, user_id_type: 'user_id', page_size: '50' });
+      const qs = new URLSearchParams({ department_id: deptId, department_id_type: 'department_id', user_id_type: 'user_id', page_size: '50' });
       if (pageToken) qs.set('page_token', pageToken);
       const res = await fetch(`${OPEN_API}/contact/v3/users?${qs}`, {
         signal: AbortSignal.timeout(20000),
@@ -58,11 +60,22 @@ async function listUsersWithUserId() {
       if (j.code !== 0) throw feishuAttError(j.code, j.msg);
       const list = (j.data && j.data.items) || [];
       for (const u of list) {
-        if (u.department_ids) for (const d of u.department_ids) if (!depts.includes(d) && !seen.has('dept:' + d)) { depts.push(d); seen.add('dept:' + d); }
-        if (u.user_id && u.name && !seen.has(u.user_id)) { seen.add(u.user_id); users.push({ userid: u.user_id, name: u.name }); }
+        if (u.department_ids) for (const d of u.department_ids) if (!seen.has('dept:' + d)) { depts.push(d); seen.add('dept:' + d); }
+        if (u.user_id && u.name && !seen.has(u.user_id)) { seen.add(u.user_id); users.push({ userid: String(u.user_id), name: u.name, openId: u.open_id || '' }); }
       }
       pageToken = (j.data && j.data.page_token) || '';
     } while (pageToken);
+    // 子部门递归（路径式 children；query 形态是 99992380 幻影参数）
+    try {
+      const cr = await fetch(`${OPEN_API}/contact/v3/departments/${encodeURIComponent(deptId)}/children?department_id_type=department_id&user_id_type=user_id&page_size=50`, {
+        signal: AbortSignal.timeout(20000),
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const cj = await cr.json();
+      for (const cd of ((cj.data && cj.data.items) || [])) {
+        if (cd.department_id && !seen.has('dept:' + cd.department_id)) { seen.add('dept:' + cd.department_id); depts.push(cd.department_id); }
+      }
+    } catch (e) { /* 子部门发现失败不阻塞：已发现部门的人照常返回 */ }
   }
   return users;
 }
@@ -317,10 +330,20 @@ function shanghaiDateOf(sec) {
  * 工作日边界 06:00（平台 day 字段，06:00–次日 05:59）；跨天班次由平台挂在起始日，
  * 本函数不按午夜重切。need_overtime_result=true，同一天多个班段（正常+加班）逐段返回。
  * 单边卡：NoNeedCheck 记为无需下班卡（missing=false），其余标缺卡（missing=true）。
+ * @param {{extraMembers?: Array<{userid,name,openId?}>}} opts 名单补充（2026-10-26 曼波定：
+ *   通讯录里不在值日白名单的人都要进周报，用户组/梯队部门覆盖不到的电控组等成员靠这里并入）
  * @returns {{sessions: Array, userCount: number, invalidUserIds: string[], unauthorizedUserIds: string[]}}
  */
-async function fetchTaskSessions(startMs, endMs) {
+async function fetchTaskSessions(startMs, endMs, opts = {}) {
   const { userIds, names } = await resolveUserIds();
+  const extraMembers = (opts.extraMembers || []).filter((m) => m && m.userid);
+  const extraNames = new Map(extraMembers.map((m) => [String(m.userid), m.name]));
+  const allIds = userIds.map(String);
+  const known = new Set(allIds);
+  for (const m of extraMembers) {
+    const id = String(m.userid);
+    if (!known.has(id)) { known.add(id); allIds.push(id); }
+  }
   const token = await getTenantAccessToken();
   const from = shanghaiYmd(startMs);
   const to = shanghaiYmd(endMs - 1); // end 为下周一 00:00，工作日至周日
@@ -328,8 +351,8 @@ async function fetchTaskSessions(startMs, endMs) {
   const invalidUserIds = [];
   const unauthorizedUserIds = [];
 
-  for (let i = 0; i < userIds.length; i += BATCH_USER_LIMIT) {
-    const batch = userIds.slice(i, i + BATCH_USER_LIMIT);
+  for (let i = 0; i < allIds.length; i += BATCH_USER_LIMIT) {
+    const batch = allIds.slice(i, i + BATCH_USER_LIMIT);
     const qs = new URLSearchParams({ employee_type: 'employee_id', ignore_invalid_users: 'true' });
     const res = await fetch(`${OPEN_API}/attendance/v1/user_tasks/query?${qs}`, {
       method: 'POST',
@@ -350,7 +373,7 @@ async function fetchTaskSessions(startMs, endMs) {
     for (const task of ((j.data && j.data.user_task_results) || [])) {
       const uid = String(task.user_id || '');
       if (!uid) continue;
-      const name = task.employee_name || names.get(uid) || uid;
+      const name = task.employee_name || extraNames.get(uid) || names.get(uid) || uid;
       const day = platformDayStr(task.day);
       for (const seg of (task.records || [])) {
         const inRec = seg.check_in_record || null;
@@ -381,7 +404,7 @@ async function fetchTaskSessions(startMs, endMs) {
       }
     }
   }
-  return { sessions, userCount: userIds.length, invalidUserIds, unauthorizedUserIds };
+  return { sessions, userCount: allIds.length, invalidUserIds, unauthorizedUserIds };
 }
 
 module.exports = { fetchFlows, fetchTaskSessions, listGroups, listUsersWithUserId, resolveUserIds, resolveGroupMembers };

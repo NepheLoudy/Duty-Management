@@ -147,9 +147,12 @@
 `DUTY_BOARD_WEBHOOK_URL` 分发、复用 gateTask 触发体系。）
 
 - **时长口径（2026-10-18 曼波定）**：以飞书考勤「打卡结果」的平台上下班配对为准——工作日边界 **06:00**（06:00–次日 05:59），平台按班次把上班/下班卡配成班段，跨天班次计入起始日；同一天多个班段逐段累加（加班段计入）；单边卡标「缺卡」不计时长（平台 NoNeedCheck 的单边卡不算缺卡）；名单内未打卡者 0 时长呈现。`import`/`http` 兜底档仍用原始流水两两配对（旧口径）；
-- **周报卡**：每人「打卡 N 天 · 合计时长」（有缺卡时附计数），有缺卡/零打卡的周橙色头；经值日看板同一条
+- **周报卡（2026-10-26 v63 起短卡）**：只发「合计 + 留档链接」，不再往群里刷逐人名单
+  （长名单影响队员工作），明细以周为单位看留档表；经值日看板同一条
   群 webhook 发送（`ZKLINK_WEBHOOK_URL` 可覆盖，缺省回落 `DUTY_BOARD_WEBHOOK_URL`）；
-- **云文档留档**：每周一节（heading2 周标题 → 口径/合计 → 本周汇总逐人 → 打卡明细逐条），
+- **云文档留档**：wiki 节点 `obj_type=docx` 时每周一节（heading2 周标题 → 口径/合计 → 本周汇总逐人 →
+  打卡明细逐条）；`obj_type=bitable`（现网「打卡记录」）时按人每周一行，同周按人 upsert——
+  缺的人补建、时长/及格变化更新（v64）、其余不动，重跑幂等；
   `ZKLINK_ARCHIVE_DOC_TOKEN` 兼容 wiki 节点 token（自动 get_node 换算，需应用 wiki 只读权限）
   与 docx token；应用身份复用 `APP_ID/APP_SECRET`（需 docx 权限 + 应用被加为文档协作者）；
   未配置时本地兜底、卡片照发；本地 `duty-bot-data/zklink/archive/` 每周落盘 JSON 全量 + CSV；
@@ -158,7 +161,11 @@
   （平台上下班配对，工作日 06:00–次日 05:59 切天，跨天班次挂在起始日；`need_overtime_result=true`），
   应用身份复用 `APP_ID/APP_SECRET` 全自动无人值守；名单以**飞书考勤组成员为准**（曼波 2026-10-08 定「考勤组规则」：
   组内没打卡的人 0 时长也要呈现；`ZKLINK_ATT_GROUP_NAME` 填组名 / 仅一个组自动取用；取不到回落通讯录全员），
-  拉数人员=通讯录全员 user_id（`ZKLINK_ATT_USER_IDS` 可显式收窄）；飞书后台需开考勤权限（`attendance:rule:readonly`、
+  但考勤组真实成员在人事假勤域读不到，实际名单 = 用户组（`ZKLINK_USER_GROUP_NAME`）+ 部门补充
+  （`ZKLINK_ROSTER_DEPT_IDS`）**∪ 通讯录全员中不在值日白名单（`config/whitelist.json`）的人**
+  （2026-10-26 v64：用户组只挂 22 人、梯队部门 48 人，电控组等非白名单成员会整片漏报；
+  白名单成员不补，避免一排 0 时长噪音），
+  拉数人员=名单经 user_id 展开（`ZKLINK_ATT_USER_IDS` 可显式收窄）；飞书后台需开考勤权限（`attendance:rule:readonly`、
   打卡结果 `attendance:task:readonly`、`contact:user.employee_id:readonly`，报错 99991672 自带一键开通链接）。
   `import` 兜底——ZKLink 网页端（考勤 → 打卡记录）导出 xlsx/csv →
   `POST /api/attendance/import` 上传（容错列匹配，「打卡时间」单列与「日期+时间」分列都认，
@@ -170,8 +177,9 @@
   无水位不自动补发（防部署即广播）；
 - **名单**：打卡 state 内 `members`（导入自动派生合并 + `/api/attendance/members` 手工增删），
   不设独立私有配置文件；
-- 桩测试：`stub-test-zklink*.js` 8 套 170+ 断言（窗口+parseCron / 时长聚合 / 导入 / 客户端 /
-  卡片块 / 留档 wiki 换算与分批 / 飞书考勤数据源 / **平台班段 sessions（user_tasks 配对、06:00 切天、缺卡）**）；
+- 桩测试：`stub-test-zklink*.js` 10 套（窗口+parseCron / 时长聚合 / 导入 / 客户端 /
+  卡片块 / 留档 wiki 换算与分批 / 飞书考勤数据源（含通讯录树遍历）/ **平台班段 sessions（user_tasks 配对、06:00 切天、缺卡、名单补齐）** /
+  多维表格归档（按人每周一行 + 同周 upsert））；
 - 已知边界（2026-10-08 审查披露）：①云文档分批追加非原子，多批中途失败后重试会重复
   已写入批次的小节（人肉删即可，未做内容级去重）；②watchdog 只补最近一个周期，宕机跨
   多周时中间周需人工 `test-broadcast` 带 `weekOffset` 逐周补；③`preview` 端点无鉴权
