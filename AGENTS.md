@@ -39,5 +39,5 @@
 - 定时播报一律过 quietHours 闸门（收口等业务写表动作不延迟，仅通知过闸门）；
 - 多维表格为排班单一事实来源（轮转状态每次生成时从表格既有记录反推，不单独维护双份状态）；
 - 部署一律 `npm run push`（qianli-deploy 链路）；
-- **隐私**：真实名册/白名单（config/members.json、whitelist.json）与 .env 永不进 git，
+- **隐私**：真实名册/白名单（config/members.json、whitelist.json、attendance-whitelist.json）与 .env 永不进 git，
   仓库只保留 *.example.json 模板；代码、文档、注释、测试一律不出现真实姓名/open_id/群凭据。

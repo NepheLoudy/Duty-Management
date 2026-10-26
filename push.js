@@ -57,7 +57,7 @@ const PM2_NAME = 'duty-bot';
 // 【运行时数据保护】这两份文件的权威编辑路径在部署目标侧（运维台/定制窗口），本地只是种子：
 // 上传前先备份部署目标现网版本；本地条目数少于现网时跳过上传（PUSH_FORCE_PRIVATE=1 强制覆盖）。
 // 事故记录：2026-09-12 v9 推送曾用本地空 whitelist.json 覆盖 NAS 18 人排除名单（不可恢复）。
-const PRIVATE_CONFIG_FILES = ['config/members.json', 'config/whitelist.json', 'config/policy-override.json'];
+const PRIVATE_CONFIG_FILES = ['config/members.json', 'config/whitelist.json', 'config/attendance-whitelist.json', 'config/policy-override.json'];
 const DATA_DIR = '/c/home/qianli/duty-bot-data';
 const DATA_DIR_WIN = 'C:/home/qianli/duty-bot-data';
 
@@ -199,6 +199,7 @@ async function deployCode(sftp, plan) {
       '--exclude=.env.*.local',
       '--exclude=config/members.json',
       '--exclude=config/whitelist.json',
+      '--exclude=config/attendance-whitelist.json',
       '--exclude=config/policy-override.json',
       '--exclude=.duty-state.json',
       '--exclude=.quiet-backlog.json',

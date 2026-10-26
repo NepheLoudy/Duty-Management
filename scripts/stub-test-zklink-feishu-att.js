@@ -237,6 +237,25 @@ function check(name, cond, extra = '') {
   const ru8 = await att8.resolveUserIds();
   check('resolveUserIds 回落通讯录', ru8.userIds.join(',') === 'u_fb1', JSON.stringify(ru8));
 
+  console.log('\n== 9. 考勤白名单加载（独立于值日白名单，2026-10-26） ==');
+  const wlOk = path.join(tmp, 'att-wl.json');
+  fs.writeFileSync(wlOk, JSON.stringify({ names: [' 张三 ', '李四', ''] }));
+  process.env.ZKLINK_ATT_WHITELIST_FILE = wlOk;
+  delete require.cache[require.resolve('../src/zklink/config')];
+  let cfg9 = require('../src/zklink/config');
+  check('读名并 trim/过滤空串', JSON.stringify(cfg9.loadAttendanceWhitelist()) === JSON.stringify(['张三', '李四']), JSON.stringify(cfg9.loadAttendanceWhitelist()));
+  const wlBad = path.join(tmp, 'att-wl-bad.json');
+  fs.writeFileSync(wlBad, '{oops');
+  process.env.ZKLINK_ATT_WHITELIST_FILE = wlBad;
+  delete require.cache[require.resolve('../src/zklink/config')];
+  cfg9 = require('../src/zklink/config');
+  check('坏 JSON → 空数组不抛（不静默藏人）', Array.isArray(cfg9.loadAttendanceWhitelist()) && cfg9.loadAttendanceWhitelist().length === 0);
+  process.env.ZKLINK_ATT_WHITELIST_FILE = path.join(tmp, 'att-wl-none.json');
+  delete require.cache[require.resolve('../src/zklink/config')];
+  cfg9 = require('../src/zklink/config');
+  check('文件缺失 → 空数组 + 警告', Array.isArray(cfg9.loadAttendanceWhitelist()) && cfg9.loadAttendanceWhitelist().length === 0);
+  delete process.env.ZKLINK_ATT_WHITELIST_FILE;
+
   console.log(`\n结果：${pass} 通过 / ${fail} 失败`);
   process.exit(fail === 0 ? 0 : 1);
 })().catch((e) => { console.error(e); process.exit(1); });

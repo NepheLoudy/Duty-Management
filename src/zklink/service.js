@@ -23,7 +23,6 @@ const { sendCardToWebhook } = require('../feishu/webhook');
 const feishuDoc = require('./feishuDoc');
 const card = require('./card');
 const importService = require('./importService');
-const roster = require('../services/rosterService');
 
 let running = false;
 
@@ -58,15 +57,16 @@ async function runWeekly({ offset = 0, dryRun = false, trigger = 'cron' } = {}) 
     // 数据源从打卡流水 user_flows 切到打卡结果 user_tasks：平台按班次配好上下班卡，
     // 工作日 06:00–次日 05:59 切天，跨天班次挂在起始日，同一天多个班段逐段返回。
     //
-    // 名单补齐（v64，2026-10-26 曼波定）：考勤组真实成员不可读，通讯录里**不在值日白名单**
-    // 的人都要进周报——用户组只挂 22 人、梯队部门 48 人，电控组/机械组等非白名单成员会
-    // 整个漏掉（莫雨衡本周满勤却不在表里实锤）。白名单成员不补，避免一排 0 时长噪音。
+    // 名单补齐（v64，2026-10-26 曼波定）：考勤组真实成员不可读，通讯录里**不在考勤白名单**
+    // 的人都要进周报——用户组只挂 22 人、梯队部门 48 人，电控组/机械组等成员会整个漏掉
+    //（莫雨衡本周满勤却不在表里实锤）。考勤白名单 = config/attendance-whitelist.json（免打卡/
+    // 不记入周报名单），与值日白名单分开：值日白名单里有在岗打卡的现役队员，不能拿来过滤。
     let extraMembers = [];
     try {
       const users = await feishuAttendance.listUsersWithUserId();
-      const whitelist = new Set(roster.loadWhitelistNames());
+      const whitelist = new Set(config.loadAttendanceWhitelist());
       extraMembers = users.filter((u) => !whitelist.has(u.name));
-      console.log(`[打卡周报] 通讯录补齐：通讯录 ${users.length} 人 − 白名单 ${users.length - extraMembers.length} 人 → 并入 ${extraMembers.length} 人`);
+      console.log(`[打卡周报] 通讯录补齐：通讯录 ${users.length} 人 − 考勤白名单 ${users.length - extraMembers.length} 人 → 并入 ${extraMembers.length} 人`);
     } catch (e) {
       console.warn(`[打卡周报] 通讯录补齐名单失败（${e.message}），按考勤组/用户组名单继续`);
     }

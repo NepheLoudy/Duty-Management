@@ -11,6 +11,7 @@
 // cron 口径与 duty-bot 全仓一致：node-cron 6 段式（秒 分 时 日 月 周）；也兼容 5 段。
 // ============================================================
 const path = require('path');
+const fs = require('fs');
 // 幂等 dotenv：生产由主 config 先加载（此处不覆盖已存在值），独立调用/脚本时兜底加载
 require('dotenv').config({ path: path.join(__dirname, '..', '..', '.env') });
 
@@ -73,6 +74,12 @@ const config = {
   // 周时长及格线（小时，正数）——归档「是否及格」列判定；未配置/0=不写该列（口径待曼波，系统较复杂）
   passHours: (() => { const n = Number(process.env.ZKLINK_PASS_HOURS); return Number.isFinite(n) && n > 0 ? n : 0; })(),
 
+  // 考勤白名单（2026-10-26 曼波定）：免打卡/不记入打卡周报的人名清单。
+  // 与值日白名单（config/whitelist.json）**不是同一份**——值日白名单里既有免考勤的顾问/正式，
+  // 也有正常打卡的现役队员（张郭浩等），拿它过滤考勤会误伤在岗的人。
+  // 文件不存在/损坏时按「不排除任何人」处理（宁可多列 0 时长，不静默藏人）。
+  attendanceWhitelistFile: process.env.ZKLINK_ATT_WHITELIST_FILE || path.join(ROOT, 'config', 'attendance-whitelist.json'),
+
   stateFile: process.env.ZKLINK_STATE_FILE || path.join(DATA_DIR, 'zklink-state.json'),
   exportsDir: process.env.ZKLINK_EXPORTS_DIR || path.join(DATA_DIR, 'exports'),
   archiveDir: process.env.ZKLINK_ARCHIVE_DIR || path.join(DATA_DIR, 'archive'),
@@ -103,4 +110,20 @@ function warnFallback(expr, why) {
   return { minute: 30, hour: 9, dow: 1, parsed: false };
 }
 
-module.exports = { ...config, parseCron };
+// 考勤白名单人名（config/attendance-whitelist.json 的 { names: [...] }，零门槛维护）。
+// 缺文件/坏 JSON 一律返回空数组并 warn：宁可在周报里多列一个 0 时长，也不静默藏人。
+function loadAttendanceWhitelist() {
+  try {
+    if (!fs.existsSync(config.attendanceWhitelistFile)) {
+      console.warn(`[打卡周报] 未找到考勤白名单文件 ${config.attendanceWhitelistFile}（不排除任何人）——照 config/attendance-whitelist.example.json 创建`);
+      return [];
+    }
+    const data = JSON.parse(fs.readFileSync(config.attendanceWhitelistFile, 'utf-8'));
+    return Array.isArray(data.names) ? data.names.map((n) => String(n).trim()).filter(Boolean) : [];
+  } catch (err) {
+    console.warn(`[打卡周报] 读取考勤白名单失败（不排除任何人）: ${err.message}`);
+    return [];
+  }
+}
+
+module.exports = { ...config, parseCron, loadAttendanceWhitelist };

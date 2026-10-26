@@ -162,9 +162,9 @@
   应用身份复用 `APP_ID/APP_SECRET` 全自动无人值守；名单以**飞书考勤组成员为准**（曼波 2026-10-08 定「考勤组规则」：
   组内没打卡的人 0 时长也要呈现；`ZKLINK_ATT_GROUP_NAME` 填组名 / 仅一个组自动取用；取不到回落通讯录全员），
   但考勤组真实成员在人事假勤域读不到，实际名单 = 用户组（`ZKLINK_USER_GROUP_NAME`）+ 部门补充
-  （`ZKLINK_ROSTER_DEPT_IDS`）**∪ 通讯录全员中不在值日白名单（`config/whitelist.json`）的人**
-  （2026-10-26 v64：用户组只挂 22 人、梯队部门 48 人，电控组等非白名单成员会整片漏报；
-  白名单成员不补，避免一排 0 时长噪音），
+  （`ZKLINK_ROSTER_DEPT_IDS`）**∪ 通讯录全员中不在考勤白名单（`config/attendance-whitelist.json`）的人**
+  （2026-10-26：用户组只挂 22 人、梯队部门 48 人，电控组等成员会整片漏报；
+  考勤白名单独立于值日白名单——后者含正常打卡的现役队员，不能拿来过滤考勤），
   拉数人员=名单经 user_id 展开（`ZKLINK_ATT_USER_IDS` 可显式收窄）；飞书后台需开考勤权限（`attendance:rule:readonly`、
   打卡结果 `attendance:task:readonly`、`contact:user.employee_id:readonly`，报错 99991672 自带一键开通链接）。
   `import` 兜底——ZKLink 网页端（考勤 → 打卡记录）导出 xlsx/csv →
@@ -236,8 +236,9 @@
 
 ### 隐私约定（重要）
 
-- **`config/members.json`（真实名册，含 open_id）与 `config/whitelist.json`（人名白名单）
-  已在 .gitignore，永不进 git**；仓库只保留 `*.example.json` 模板；
+- **`config/members.json`（真实名册，含 open_id）、`config/whitelist.json`（值日白名单）与
+  `config/attendance-whitelist.json`（考勤白名单：免打卡/不记入打卡周报的人）已在 .gitignore，
+  永不进 git**；仓库只保留 `*.example.json` 模板；
 - push.js 打包与 git 之外，会显式把这两个文件 SFTP 到部署目标（git 路径部署仓库里没有它们）；
 - 代码、文档、注释、测试一律不出现真实姓名/open_id/群凭据（用「管理员/队员A」代称）；
 - 运行状态 `.duty-state.json`、积压 `.quiet-backlog.json` 同样不入 git。

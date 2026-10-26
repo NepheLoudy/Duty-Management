@@ -9,6 +9,8 @@ node_modules/
 # 真实名册与白名单（含真实姓名/open_id，严禁提交；仓库只保留 *.example.json 模板）
 config/members.json
 config/whitelist.json
+# 考勤白名单（免打卡/不记入打卡周报的人名，独立于值日白名单）
+config/attendance-whitelist.json
 
 # 运行时状态（含会话/补偿义务等，勿提交）
 .duty-state.json
