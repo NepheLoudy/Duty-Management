@@ -151,10 +151,10 @@ async function createField(appToken, tableId, field) {
   return res.data;
 }
 
-/** 重命名字段（把建表自带的默认文本主键改成「姓名」） */
+/** 重命名字段（把建表自带的默认文本主键改成「姓名」）——飞书更新字段接口是 PUT 不是 PATCH（同 create-plaza-tables.js 踩坑记录，2026-10-30 审查批 P1 勘误） */
 async function renameField(appToken, tableId, fieldId, fieldName) {
   const res = await requestAPI(
-    'PATCH',
+    'PUT',
     `/bitable/v1/apps/${appToken}/tables/${tableId}/fields/${fieldId}`,
     { field_name: fieldName }
   );

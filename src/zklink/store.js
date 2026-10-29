@@ -18,7 +18,11 @@ function loadState() {
     return JSON.parse(fs.readFileSync(config.stateFile, 'utf8'));
   } catch (e) {
     if (e.code === 'ENOENT') return {};
-    throw e;
+    // 损坏文件另存 .corrupt.bak 后按空状态启动（照主 stateStore 模式，2026-10-30 审查批 P2）——
+    // 此前直接 throw 且 guardedRun 失败路径的 mergeSaveState 也调 loadState，坏文件会让重试链永远失败
+    try { fs.renameSync(config.stateFile, config.stateFile + '.corrupt.bak'); } catch { /* 忽略 */ }
+    console.error('[zklink] 状态文件损坏，已另存 .corrupt.bak 并按空状态启动:', e.message);
+    return {};
   }
 }
 

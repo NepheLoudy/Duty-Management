@@ -208,8 +208,12 @@ app.post('/api/bot/test-lastcall', requireApiToken, async (req, res) => {
 
 app.post('/api/bot/test-close', requireApiToken, async (req, res) => {
   try {
+    // 缺省 dryRun（2026-10-30 审查批 P2：收口会置「未做完」+登记补偿义务且无撤销机制，
+    // 白天误触=当班队员各多一次补偿值日）；{ confirm: true } 显式才实跑，对齐 test-generate/test-board 预览口径
+    const confirm = req.body?.confirm === true;
+    const dryRun = confirm ? false : (req.body?.dryRun ?? true);
     // 手动触发不受静默限制（bypassQuiet：回执直接发送，不落积压）
-    res.json({ success: true, result: await runClose({ dryRun: !!req.body?.dryRun, bypassQuiet: true }) });
+    res.json({ success: true, result: await runClose({ dryRun, bypassQuiet: true }), dryRun, hint: confirm ? undefined : '本次为预览（dryRun）；确认执行请传 {"confirm": true}' });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

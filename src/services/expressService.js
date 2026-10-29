@@ -196,7 +196,8 @@ function renderList(items, numbers) {
     .map((r) => {
       const n = numbers[r.recordId] || '?';
       const time = r.regMs ? new Date(r.regMs + 8 * 3600 * 1000).toISOString().slice(11, 16) : '';
-      return `${n}. ${r.code || '（未留码）'}${r.imageTokens.length ? ' 📷' : ''} · ${r.sender}${time ? ` · ${time} 登记` : ''}`;
+      // 渲染出口再剥一次（防御纵深：入库消毒上线前的存量码可能带注入语法）
+      return `${n}. ${stripAtTags(r.code) || '（未留码）'}${r.imageTokens.length ? ' 📷' : ''} · ${r.sender}${time ? ` · ${time} 登记` : ''}`;
     })
     .join('\n');
 }
@@ -215,7 +216,7 @@ function renderCloseSummary(win, items, numbers) {
   const inWindow = items.filter((r) => r.regMs >= win.openedAt - 5000 && r.regMs <= win.expiresAt + 60 * 1000);
   if (!inWindow.length) return '📦 登记窗口关闭，本次没有登记到快递。';
   const lines = inWindow
-    .map((r) => `${numbers[r.recordId] || '?'}. ${r.code || '（未留码）'}${r.imageTokens.length ? ' 📷' : ''} · ${r.sender}`)
+    .map((r) => `${numbers[r.recordId] || '?'}. ${stripAtTags(r.code) || '（未留码）'}${r.imageTokens.length ? ' 📷' : ''} · ${r.sender}`)
     .join('\n');
   return `📦 登记窗口关闭，本次共登记 ${inWindow.length} 件：\n${lines}\n取完发「@我 已取编号」或「全部已取」，我会每小时播报未取清单。`;
 }
@@ -296,13 +297,18 @@ function isControlText(text) {
   return cmds.includes(text) || cmds.includes(text.replace(/^\//, ''));
 }
 
+// 取件码=窗口内任意成员发的任意文字，剥 <at ...>/<at user_id="all"> 字面串——
+// text 消息渲染时会解析该语法，原样入库会随整点播报/关窗摘要进群 @所有人（2026-10-30 审查批 P1；
+// 与 hub/ticket 侧 utils/sanitize 同款第一类语法，text 消息不渲染 markdown 链接故只剥 at 标签）
+const stripAtTags = (s) => String(s ?? '').replace(/<\/?at\b[^>]*>/gi, '');
+
 async function registerText({ text, openId, messageId }) {
   const all = await listExpressRecords();
   if (messageId && all.some((r) => r.messageId === messageId)) {
     return { handled: true, reply: '' }; // 重投/重转去重
   }
   const fields = {
-    [f().code]: text,
+    [f().code]: stripAtTags(text),
     [f().regTime]: Date.now(),
     [f().picked]: '未取',
     [f().messageId]: messageId || '',

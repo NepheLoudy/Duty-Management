@@ -3,7 +3,8 @@
 > 版本隔离单位 = 一次 `npm run push`（即一次 git 提交 + 一次部署）。
 > 每次 push 完成后在文末追加：`## vN · YYYY-MM-DD · <提交哈希> · <类型>`，
 > 正文为提交说明原文 + 实际改动要点。vN 只增不复用，历史条目不改写。
-> 当前最新：**v65**（2026-10-26，考勤白名单独立成文件（与值日白名单解耦）+ 周报名单 71 人，20 套全绿）。
+> 当前最新：**v66**（2026-10-30，全量审查修复批：建表 PUT 勘误+快递取件码消毒+test-close 缺省预览+zklink 损坏兜底+文档同步，20 套全绿）。
+上一版：**v65**（2026-10-26，考勤白名单独立成文件（与值日白名单解耦）+ 周报名单 71 人，20 套全绿）。
 上一版：**v64**（2026-10-26，打卡周报名单补漏：通讯录成员并入 + 归档按人 upsert，20 套全绿）。
 上一版：**v63**（2026-10-26，打卡周报改「留档先行 + 短卡发链接」（不再刷逐人名单），20 套全绿）。
 上一版：**v62**（2026-10-24，白名单成员不再登记补偿义务（治清后重生）+ 白名单批量+8 并清班次义务，20 套全绿）。
@@ -697,3 +698,14 @@
 - **干跑（真实数据）**：71 人（有打卡 67）/ 358 段有效 / 缺卡 0 / 合计 2320h33m；莫雨衡 78h43m，张天煦不再出现。
 - **测试**：feishu-att 套件新增第 9 节（名单读取 trim/坏 JSON/缺文件三态）；`npm test` 20 套全绿。
 - **运维**：第 7 周表删掉先前误补的张天煦行（72→71），其余 71 行不动。
+
+## v66 · 2026-10-30 · 随本提交落地 · fix
+
+**全量审查修复批（子代理只读审查 + 主会话修复，20 套全绿）**
+
+- **P1 · 建表脚本主键改名 PUT 勘误**：`bitable.js renameField` 用 PATCH 调「更新字段」接口必失败——同仓 create-plaza-tables.js 踩坑注释明写该接口是 PUT；`npm run table:create` 的自动化主键改名步恢复可用（不影响在跑服务）。
+- **P1 · 快递取件码消毒**：登记入库（registerText）与播报/关窗摘要渲染出口双侧重剥 `<at ...>` 字面串——取件码=窗口内任意成员的任意文字，text 消息渲染会解析该语法，原样透传可随整点播报进群 @所有人（hub/ticket 侧 sanitize 同款第一类语法；text 消息不渲染 markdown 链接，只剥 at 标签）。
+- **P2 · /api/bot/test-close 缺省改 dryRun**：收口会置「未做完」+登记补偿义务且无事后撤销机制，白天误触=当班队员各多一次补偿值日；现缺省预览、`{"confirm": true}` 显式实跑，对齐 test-generate/test-board 口径，回执带 hint。
+- **P2 · zklink 状态文件损坏兜底**：loadState 照主 stateStore 模式——损坏另存 .corrupt.bak 后按空状态启动+告警；此前直接 throw 且 guardedRun 失败路径的 mergeSaveState 也调 loadState，坏文件会让周报重试链永远失败。
+- **P2 · 文档同步**：.env.example 头部去 NAS 命名；ZKLink 段补 6 个现役键（WEEK1_START/ATT_USER_IDS/ATT_WHITELIST_FILE/WEBHOOK_URL/PASS_HOURS/ARCHIVE_LINK_BASE）+ ZKLINK_WEEK 无效键勘误 + 「feishu 档需配齐账密」过时注释修正（那是 http 直拉档）；README 隐私约定「两个文件」→4 个（push.js 实为 members/whitelist/attendance-whitelist/policy-override）；值日助手 HELP_TEXT 打卡时点同步 v46 行为（中午提醒起即可打卡，原写 18:30 询问后）。
+- 审查遗留待确认（未修）：usage 上报缺口（值日打卡/请假/快递登记不进功能使用分布——主修点在 hub 值日分支还是 duty handleCommand 出口待裁定）；归档链接恒拼 /wiki/ 前缀（纯 docx token 形态会 404，现网恒为 wiki 节点）；收口无补触（进程死亡跨 04:00 窗口靠对账兜底最长延迟 1-2 天）；push.js restart PATH 仅便携版 node（现网一致，按机检查以实测为准）。

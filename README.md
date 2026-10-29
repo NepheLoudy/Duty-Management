@@ -239,7 +239,7 @@
 - **`config/members.json`（真实名册，含 open_id）、`config/whitelist.json`（值日白名单）与
   `config/attendance-whitelist.json`（考勤白名单：免打卡/不记入打卡周报的人）已在 .gitignore，
   永不进 git**；仓库只保留 `*.example.json` 模板；
-- push.js 打包与 git 之外，会显式把这两个文件 SFTP 到部署目标（git 路径部署仓库里没有它们）；
+- push.js 打包与 git 之外，会显式把 4 个私有配置（members/whitelist/attendance-whitelist/policy-override）SFTP 到部署目标（git 路径部署仓库里没有它们）；
 - 代码、文档、注释、测试一律不出现真实姓名/open_id/群凭据（用「管理员/队员A」代称）；
 - 运行状态 `.duty-state.json`、积压 `.quiet-backlog.json` 同样不入 git。
 
