@@ -107,6 +107,8 @@ function check(name, cond, extra = '') {
   const lc = await inquiry.sendLastCall({ dryRun: true });
   check('临门提醒查询的是值日业务日 10-22（非挂钟今天 10-23）', lc.date === DUTY_DAY && lc.sent.length === 1, JSON.stringify({ date: lc.date, sent: lc.sent }));
   check('临门提醒文案告知次日凌晨 4:00 验收', lc.sent[0].preview.includes('次日凌晨 4:00'), lc.sent[0].preview);
+  check('临门提醒：总负责预览附加强调行（大垃圾桶+套袋）',
+    lc.sent[0].preview.includes('大垃圾桶') && lc.sent[0].preview.includes('大垃圾袋'), lc.sent[0].preview);
 
   console.log(`\n结果：${pass} 通过 / ${fail} 失败`);
   process.exit(fail === 0 ? 0 : 1);

@@ -152,9 +152,22 @@ function check(desc, cond, detail = '') {
   const remind = await inquiry.sendPrevDayRemind();
   check('D-1 提醒：明日无排班时不发送', remind.sent.length === 0);
 
+  // ---- 1.5 D-1 提醒总负责强调行（自建明日班次，断言后即删防污染后续用例） ----
+  await dutyTable.createDayRecords(addDays(todayStr(), 1), [{ member: roster.findByName('队员A'), position: '总负责' }]);
+  const remindLeader = await inquiry.sendPrevDayRemind({ dryRun: true });
+  check('D-1 提醒：总负责预览附加强调行（大垃圾桶+套袋）',
+    remindLeader.sent.length === 1 && remindLeader.sent[0].preview.includes('大垃圾桶') && remindLeader.sent[0].preview.includes('大垃圾袋'),
+    JSON.stringify(remindLeader.sent));
+  await dutyTable.batchDeleteRecords((await dutyTable.getRecordsByDate(addDays(todayStr(), 1))).map((r) => r.recordId));
+
   // ---- 2. 当日询问 ----
   const dryAsk = await inquiry.askToday({ dryRun: true });
   check('当日询问 dryRun：3 人待询问', dryAsk.asked.length === 3, JSON.stringify(dryAsk.asked));
+  const dryAskA = dryAsk.asked.find((a) => a.name === '队员A');
+  const dryAskB = dryAsk.asked.find((a) => a.name === '队员B');
+  check('当日询问：总负责预览附加强调行（大垃圾桶+套袋）',
+    dryAskA && dryAskA.preview.includes('大垃圾桶') && dryAskA.preview.includes('大垃圾袋'), dryAskA && dryAskA.preview);
+  check('当日询问：非总负责岗位不附加强调行', dryAskB && !dryAskB.preview.includes('大垃圾桶'), dryAskB && dryAskB.preview);
   const ask = await inquiry.askToday();
   check('当日询问：私信 3 人', memory.dmCalls.filter((c) => c.text.includes('值日完成了吗')).length === 3);
   check('当日询问：会话建立 3 个', Object.keys(state.load().sessions).length === 3);
@@ -603,6 +616,9 @@ function check(desc, cond, detail = '') {
     JSON.stringify({ sent: dedup2.sent, skipped: dedup2.skipped }));
   const d5DmCount = memory.dmCalls.filter((c) => c.text.includes('5 天后') && c.text.includes('值日预告')).length;
   check('两枪合计：每人只收到一条预告（无重复轰炸）', d5DmCount === 3, `实际私信 ${d5DmCount} 条`);
+  const aD5Dm = memory.dmCalls.filter((c) => c.openId === 'ou_test_a' && c.text.includes('5 天后') && c.text.includes('值日预告')).pop();
+  check('预告：总负责预览附加强调行（大垃圾桶+套袋）',
+    aD5Dm && aD5Dm.text.includes('大垃圾桶') && aD5Dm.text.includes('大垃圾袋'), aD5Dm && aD5Dm.text);
   // 还原环境：d5Date 夹具记录全部删除（防污染后续周容量/安置用例）
   await dutyTable.batchDeleteRecords((await dutyTable.getRecordsByDate(d5Date)).map((r) => r.recordId));
 
@@ -629,6 +645,17 @@ function check(desc, cond, detail = '') {
     check('中午提醒：监听会话已提前开启（不等 18:30）',
     !!(state.load().sessions['ou_test_c'] || {}).recordId,
     JSON.stringify(state.load().sessions['ou_test_c'] || {}));
+
+  // ---- 12.5 中午提醒总负责强调行（dryRun 自建班次，断言后即删；本节为末节无后续依赖） ----
+  await dutyTable.createDayRecords(todayStr(), [{ member: roster.findByName('队员A'), position: '总负责' }]);
+  const noonLeader = await inquiry.sendNoonRemind({ dryRun: true });
+  const noonLeaderA = noonLeader.sent.find((x) => x.name === '队员A');
+  const noonLeaderC = noonLeader.sent.find((x) => x.name === '队员C');
+  check('中午提醒：总负责预览附加强调行（大垃圾桶+套袋）',
+    noonLeaderA && noonLeaderA.preview.includes('大垃圾桶') && noonLeaderA.preview.includes('大垃圾袋'),
+    noonLeaderA && noonLeaderA.preview);
+  check('中午提醒：装配区预览不附加强调行', noonLeaderC && !noonLeaderC.preview.includes('大垃圾桶'), noonLeaderC && noonLeaderC.preview);
+  await dutyTable.batchDeleteRecords((await dutyTable.getRecordsByDate(todayStr())).map((r) => r.recordId));
 
   console.log(failed === 0 ? `\n全部通过 ✅（临时目录 ${TMP}）` : `\n${failed} 项失败 ❌`);
   process.exit(failed === 0 ? 0 : 1);

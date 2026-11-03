@@ -32,6 +32,18 @@ function positionDutyText(position) {
   return POSITION_DUTY[position] || '按岗位说明完成值日';
 }
 
+// 岗位附加强调行（2026-11-03 曼波定）：总负责的大垃圾桶清理+套袋最容易漏，
+// 私信提醒在职责行下追加专项强调（次日提醒/提前预告/中午提醒/询问/临门全触点生效）
+const POSITION_EXTRA_LINES = {
+  '总负责': '⚠️ 特别强调：要清理大垃圾桶，并套上大垃圾袋！',
+};
+
+/** 提醒文案用职责行：基础职责 + 岗位附加强调行（无则不追加） */
+function positionDutyLines(position) {
+  const extra = POSITION_EXTRA_LINES[position];
+  return [`职责：${positionDutyText(position)}`, ...(extra ? [extra] : [])];
+}
+
 /**
  * D-1 20:00 次日提醒：私信明日值日队员（岗位 + 职责说明 + 请假/查询引导）
  * @returns {{date, sent: number, skipped: Array, preview: Array}}
@@ -52,7 +64,7 @@ async function sendPrevDayRemind(options = {}) {
     }
     const text = [
       `🧹 提醒：明天（${date}）是你的值日日，岗位【${rec.position}】`,
-      `职责：${positionDutyText(rec.position)}`,
+      ...positionDutyLines(rec.position),
       '',
       '· 想请假：回复「我要请假」',
       '· 想查询排班：回复「值日助手」',
@@ -192,7 +204,7 @@ function buildAheadText({ daysAhead, date, rec, member, isInsert }) {
   const whenText = daysAhead === 7 ? '一周后' : daysAhead === 3 ? '三天后' : `${daysAhead} 天后`;
   return [
     `📅 值日预告：${whenText}（${date}）是你的值日日，岗位【${rec.position}】`,
-    `职责：${positionDutyText(rec.position)}`,
+    ...positionDutyLines(rec.position),
     ...(isInsert ? ['ℹ️ 本次为补偿值日（此前缺勤的补充安排）。'] : []),
     '',
     '提前留意当天的时间安排；如需请假，回复「我要请假」即可（请假当日该岗由同日队员兼顾，下周自动补一次值日）。',
@@ -229,7 +241,7 @@ async function sendNoonRemind(options = {}) {
     }
     const text = [
       `🧹 中午提个醒：今天（${date}）是你的值日日，岗位【${rec.position}】`,
-      `职责：${positionDutyText(rec.position)}`,
+      ...positionDutyLines(rec.position),
       ...(insertNames.has(rec.name) ? ['ℹ️ 本次为补偿值日（此前缺勤的补充安排）。'] : []),
       '',
       '下午完工后回复「打卡」并上传现场照片（照片会写入值日表对应岗位栏），现在起即可打卡。',
@@ -281,7 +293,7 @@ async function askToday(options = {}) {
     }
     const lines = [
       `🧹 今天（${date}）值日完成了吗？你的岗位是【${rec.position}】`,
-      `职责：${positionDutyText(rec.position)}`,
+      ...positionDutyLines(rec.position),
       ...(insertNames.has(rec.name) ? ['ℹ️ 本次为补偿值日（此前缺勤的补充安排）。'] : []),
       '',
       '完成后请回复「打卡」完成值日打卡，并上传现场照片（照片会写入值日表对应岗位栏）。',
@@ -440,6 +452,7 @@ async function sendLastCall(options = {}) {
     const photos = Object.values(rec.receiptCounts).some((n) => n > 0);
     const lines = [
       `⏰ 提醒：今天（${date}）的值日验收到次日凌晨 4:00——你的【${rec.position}】还没完成打卡。`,
+      ...(POSITION_EXTRA_LINES[rec.position] ? [POSITION_EXTRA_LINES[rec.position]] : []),
       photos
         ? '照片已收到 ✅，回复「打卡」即完成值日。'
         : '完成后回复「打卡」并上传现场照片（照片会写入值日表）；今晚做不完也可以凌晨补打卡。',
