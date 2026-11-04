@@ -30,7 +30,8 @@
     "test:midnight-accept": "node scripts/stub-test-midnight-accept.js",
     "test:quiet-flush": "node scripts/stub-test-quiet-flush.js",
     "test:zklink-archive": "node scripts/stub-test-zklink-archive.js && node scripts/stub-test-zklink-archive.js --open",
-    "test:zklink-bitable": "node scripts/stub-test-zklink-bitable.js"
+    "test:zklink-bitable": "node scripts/stub-test-zklink-bitable.js",
+    "test:state-store": "node scripts/stub-test-state-store.js"
   },
   "keywords": [
     "feishu",

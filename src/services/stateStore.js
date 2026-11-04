@@ -70,10 +70,16 @@ function save(state) {
   }
 }
 
-/** 读取-修改-写回（同步，状态量小不加锁） */
+/** 读取-修改-写回（同步，单次调用在事件循环内原子——无 await 即无交错）。
+ *  2026-11-05 全量审查注：fn 一旦引入 await 就会打破原子性（读改写间隙被其它任务
+ *  插入），故此处显式拒绝异步回调；跨 await 的 check-then-act 必须走
+ *  withScheduleLock/withLeaveLock 同款整链锁范式，不许在 mutate 回调里等 IO。 */
 function mutate(fn) {
   const state = load();
   const result = fn(state);
+  if (result && typeof result.then === 'function') {
+    throw new Error('state.mutate 回调必须是同步函数（异步回调会打破读改写原子性，跨 await 场景请用整链锁）');
+  }
   save(state);
   return result;
 }

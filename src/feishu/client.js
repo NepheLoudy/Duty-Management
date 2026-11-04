@@ -18,6 +18,9 @@ async function getTenantAccessToken() {
     throw new Error('未配置飞书应用凭证 (APP_ID/APP_SECRET)');
   }
 
+  // 2026-11-05 全量审查 P1：token 端点是全仓唯一曾无超时的出站请求——requestAPI 的
+  // 15s 超时在 token 拿到之后才起算，token 端点挂起会阻塞整条事件管道与全部定时任务
+  //（ticket-bot v94 对账卡死 48.8h 事故同款病灶，三兄弟仓均已补齐）
   const res = await fetch(`${BASE_URL}/auth/v3/tenant_access_token/internal`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -25,9 +28,14 @@ async function getTenantAccessToken() {
       app_id: config.feishu.appId,
       app_secret: config.feishu.appSecret,
     }),
+    signal: AbortSignal.timeout(15000),
   });
 
-  const data = await res.json();
+  // 对齐 requestAPI 的解析兜底：网关/代理返 HTML 时抛可读错误而非 Unexpected token
+  const data = await res.json().catch(() => null);
+  if (!data) {
+    throw new Error(`获取 tenant_access_token 返回非 JSON 响应 (HTTP ${res.status})`);
+  }
   if (data.code !== 0) {
     throw new Error(`获取 tenant_access_token 失败: ${data.msg} (code: ${data.code})`);
   }

@@ -3,7 +3,7 @@
 > 版本隔离单位 = 一次 `npm run push`（即一次 git 提交 + 一次部署）。
 > 每次 push 完成后在文末追加：`## vN · YYYY-MM-DD · <提交哈希> · <类型>`，
 > 正文为提交说明原文 + 实际改动要点。vN 只增不复用，历史条目不改写。
-> 当前最新：**v67**（2026-11-03，总负责私信提醒附加强调行：清理大垃圾桶+套大垃圾袋五触点生效，20 套全绿）。
+> 当前最新：**v68**（2026-11-05，全量审查 P1 收口——token 获取 15s 超时+解析兜底、stateStore 原子性守卫、push.js tearingDown 守卫；11 套全绿）。上一版 v67（2026-11-03，总负责私信提醒附加强调行：清理大垃圾桶+套大垃圾袋五触点生效，20 套全绿）。
 上一版：**v66**（2026-10-30，全量审查修复批：建表 PUT 勘误+快递取件码消毒+test-close 缺省预览+zklink 损坏兜底+文档同步，20 套全绿）。
 上一版：**v65**（2026-10-26，考勤白名单独立成文件（与值日白名单解耦）+ 周报名单 71 人，20 套全绿）。
 上一版：**v64**（2026-10-26，打卡周报名单补漏：通讯录成员并入 + 归档按人 upsert，20 套全绿）。
@@ -719,3 +719,12 @@
 - **口径边界**：「值日助手」查询回执（`positionDutyText`）与收口未做完回执不带强调行——前者是被动查询说明、后者是事后告知，都不是值日提醒；临门提醒原本不带职责行，仅在首行下插入强调行。
 - **测试**：新增 7 条断言覆盖五触点正例（总负责预览/实发文本含强调行）+ 询问/中午两处负例（工位区/装配区不含）：flow 套件 +6（D-1 与中午用自建夹具班次 dryRun 断言后即删防污染后续用例；D+5 预告非 dryRun 的 sent 元素无 preview，断言取 memory.dmCalls 实发文本）、midnight-accept +1（临门正例）；`npm test` 20 套全绿。
 - **文档**：README 定时任务表后新增「私信提醒文案口径」段（五触点带强调行/查询与收口回执不带）。
+## v68 · 2026-11-05 · 随本提交落地 · fix
+
+**全量审查 P1 收口批（曼波令 qianli 全项目群全量审查，duty 域报告两条 P1）**
+
+- **P1 token 获取无超时（src/feishu/client.js）**：getTenantAccessToken 的 fetch 是全仓唯一无 signal 的出站请求——requestAPI 的 15s 超时在 token 拿到之后才起算，token 端点挂起会阻塞整条事件管道与全部定时任务（ticket-bot v94 对账卡死 48.8h 事故同款病灶；出站超时横切审计确认本仓此为全群唯一真缺口）。修复：补 AbortSignal.timeout(15000)。
+- **P2 顺手（同文件）**：token 响应 res.json() 无 .catch——代理返 HTML 抛 Unexpected token 晦涩错误；对齐 requestAPI 写法，解析失败抛带 HTTP status 的可读错误。
+- **P1 状态竞态的诚实裁定**：审查建议全局 mutex，实测 mutate 本体纯同步（load→fn→save 无 await），单次调用在事件循环内天然原子，29 个调用点全为同步回调——加锁是无效仪式；真正的雷是「未来有人往回调里塞 await」。处置：mutate 显式拒绝异步回调（抛可读错误指路整链锁范式）+ 注释立规，新增 scripts/stub-test-state-store.js 3 断言（同步读改写落盘/异步回调被拒/被拒不落盘）。
+- **P2 push.js tearingDown 守卫**：conn.end() 收尾后服务端 RST 回包把成功部署误报为失败退出码 1（收尾 ECONNRESET 误报由人的经验固化为代码守卫）。
+- **测试**：11 套桩全绿（flow/express 35/schedule/policy/midnight 12/zklink 33/board/roster/generate-place 4/roster-fill 16/quiet-flush 9 + state-store 3）。
