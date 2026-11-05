@@ -38,6 +38,25 @@ const zklinkConfig = require('../zklink/config');
 
 let tasks = [];
 
+/**
+ * cron 任务命名登记表（getCronStatus 的 running 判据）：
+ * key=quietHours 任务名（gateTask 积压冲刷同名合并的口径）；value=任务注册处中文标签。
+ * 收口（duty_close）不走 scheduleTask、zklink/watchdog/rosterFill 插件按配置启停，
+ * 不进本表——running 只认核心任务齐备，附加任务数不再参与判定（2026-11-05 口径修正：
+ * 旧判定 tasks.length >= 6 数错任务源， zklink 两个可选任务一启就把「缺核心任务」
+ * 的残废态误判成 running，或反之把「任务全齐但总数没到阈值」误判成未运行）。
+ */
+const CRON_TASK_LABELS = {
+  duty_prev_remind: '次日值日提醒',
+  duty_ahead_remind: '提前值日预告',
+  duty_ask: '当日值日询问',
+  duty_noon_remind: '当日中午提醒',
+  duty_lastcall: '收口前临门提醒',
+  duty_reconcile: '值日对账',
+  duty_board_broadcast: '看板自动播报',
+  duty_express_broadcast: '快递未取播报',
+};
+
 function scheduleTask(expr, name, label, runner) {
   const task = cron.schedule(expr, () => {
     console.log(`[定时任务] 触发${label}`);
@@ -45,6 +64,8 @@ function scheduleTask(expr, name, label, runner) {
       .gateTask(name, quietHours.shanghaiStamp(), runner, label)
       .catch((err) => console.error(`[定时任务] ${label}失败:`, err.message));
   }, { timezone: 'Asia/Shanghai' });
+  task.taskName = name; // getCronStatus 按任务名齐备判定 running（见 CRON_TASK_LABELS）；
+  // 入册由调用处 tasks.push(scheduleTask(...)) 完成（本仓惯例），此处不重复 push
   console.log(`[定时任务] ${label}已启动: ${expr} (Asia/Shanghai)`);
   return task;
 }
@@ -174,11 +195,23 @@ async function runClose(options = {}) {
   return result;
 }
 
-/** cron 状态（管理接口用）。任务数：7 常规 + 提前预告域数×槽位数（默认 2×3=6）+ 1 收口（默认共 14，判 ≥6 容忍未来增减） */
+/**
+ * cron 状态（管理接口用）。running 判据=核心任务名齐备：7 个固定名任务 + 提前预告
+ * 按配置域展开的真实名（duty_ahead_remind_d7 / _d3 …）全部在册；zklink 周报/watchdog
+ * 与 rosterFill 插件按配置启停、收口不走 scheduleTask，均不参与判定（2026-11-05 口径
+ * 修正：旧判定 tasks.length >= 6 纯数任务数，zklink 可选任务一启就能把「缺核心任务」
+ * 的残废态误判成 running，任务名判定不受可选任务增减影响）。taskCount 仍暴露原始
+ * 任务数（默认配置约 15）供运维台观察增减。
+ */
 function getCronStatus() {
+  const registered = new Set(tasks.map((t) => t.taskName).filter(Boolean));
+  const expected = new Set(Object.keys(CRON_TASK_LABELS));
+  expected.delete('duty_ahead_remind'); // 族名不算，按配置域展开成真实任务名
+  for (const d of config.schedule.aheadRemind.days) expected.add(`duty_ahead_remind_d${d}`);
   return {
-    running: tasks.length >= 6,
+    running: tasks.length > 0 && [...expected].every((n) => registered.has(n)),
     taskCount: tasks.length,
+    registeredTasks: [...registered],
     schedules: config.schedule,
     quietHours: quietHours.getStatus(),
   };

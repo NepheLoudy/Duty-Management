@@ -3,7 +3,7 @@
 > 版本隔离单位 = 一次 `npm run push`（即一次 git 提交 + 一次部署）。
 > 每次 push 完成后在文末追加：`## vN · YYYY-MM-DD · <提交哈希> · <类型>`，
 > 正文为提交说明原文 + 实际改动要点。vN 只增不复用，历史条目不改写。
-> 当前最新：**v68**（2026-11-05，全量审查 P1 收口——token 获取 15s 超时+解析兜底、stateStore 原子性守卫、push.js tearingDown 守卫；11 套全绿）。上一版 v67（2026-11-03，总负责私信提醒附加强调行：清理大垃圾桶+套大垃圾袋五触点生效，20 套全绿）。
+> 当前最新：**v69**（2026-11-05，全量审查卫生批——zklink 死代码/cron 状态口径/photoOnly/express 日志净化，13 套全绿）。上一版 v68（2026-11-05，全量审查 P1 收口——token 获取 15s 超时+解析兜底、stateStore 原子性守卫、push.js tearingDown 守卫；11 套全绿）。上一版 v67（2026-11-03，总负责私信提醒附加强调行：清理大垃圾桶+套大垃圾袋五触点生效，20 套全绿）。
 上一版：**v66**（2026-10-30，全量审查修复批：建表 PUT 勘误+快递取件码消毒+test-close 缺省预览+zklink 损坏兜底+文档同步，20 套全绿）。
 上一版：**v65**（2026-10-26，考勤白名单独立成文件（与值日白名单解耦）+ 周报名单 71 人，20 套全绿）。
 上一版：**v64**（2026-10-26，打卡周报名单补漏：通讯录成员并入 + 归档按人 upsert，20 套全绿）。
@@ -728,3 +728,12 @@
 - **P1 状态竞态的诚实裁定**：审查建议全局 mutex，实测 mutate 本体纯同步（load→fn→save 无 await），单次调用在事件循环内天然原子，29 个调用点全为同步回调——加锁是无效仪式；真正的雷是「未来有人往回调里塞 await」。处置：mutate 显式拒绝异步回调（抛可读错误指路整链锁范式）+ 注释立规，新增 scripts/stub-test-state-store.js 3 断言（同步读改写落盘/异步回调被拒/被拒不落盘）。
 - **P2 push.js tearingDown 守卫**：conn.end() 收尾后服务端 RST 回包把成功部署误报为失败退出码 1（收尾 ECONNRESET 误报由人的经验固化为代码守卫）。
 - **测试**：11 套桩全绿（flow/express 35/schedule/policy/midnight 12/zklink 33/board/roster/generate-place 4/roster-fill 16/quiet-flush 9 + state-store 3）。
+## v69 · 2026-11-05 · 随本提交落地 · chore
+
+**全量审查 P2/P3 卫生批（同批全量审查 duty 域余项；dev-worker-b 完成开发，主线验收）**
+
+- **P2 zklink 死代码**：fetchFlows（user_flows 旧流水口径，v57 起无生产调用方）摘出 module.exports 并删除；文件头 1-17 行注释从 user_flows/query 改写为 user_tasks 平台配对（fetchTaskSessions）现状——消除「核心接口」误导文档（zklink 桩测同步改引）。
+- **P2 cron 状态口径**：getCronStatus 的 running 判定从 `tasks.length >= 6` 数量粗判改为关键任务名齐备校验（新增 scripts/stub-test-cron-status.js 14 断言）——运维台能区分「进程在但某任务没起来」与「全挂」。
+- **P3 photoOnly 死数据**：closeToday 返回结构中从未被消费的 photoOnly 数组删除（sendCloseNotifications 只认 missNotices/adminText）。
+- **P3 express 日志净化**：registerText 日志改用 stripAtTags 净化后的取件码（与写入字段同源）。
+- **测试**：13 套全绿（12 原套 + cron-status 14 断言）。

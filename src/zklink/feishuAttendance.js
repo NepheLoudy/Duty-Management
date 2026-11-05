@@ -4,22 +4,28 @@
 // 只是设备侧；ZKLink 网页的飞书 SSO 账号与数据无关，账密/token 自动化均走不通，
 // 飞书考勤 API 才是全自动无人值守的正路，应用身份复用 duty-bot 的 APP_ID/APP_SECRET）
 //
-// 核心接口（规格 2026-10-07 自飞书官方文档 Apifox 镜像核对）：
-//   POST /open-apis/attendance/v1/user_flows/query?employee_type=employee_id
-//     body: { user_ids: [employee_id...], check_time_from: "秒", check_time_to: "秒" }
-//     → data.user_flow_results[]: { user_id, check_time(秒字符串), comment("上班打卡"),
-//        location_name, check_result, record_id, ssid... }
+// 核心接口（2026-10-18 v57 起，规格自飞书官方文档 Apifox 镜像核对）：
+//   POST /open-apis/attendance/v1/user_tasks/query?employee_type=employee_id
+//     body: { user_ids: [employee_id...], check_date_from: 20261012, check_date_to: 20261018,
+//             need_overtime_result: true }
+//     → data.user_task_results[]: { user_id, employee_name, day, records: [{
+//        check_in_record{check_time(秒)}, check_out_record{check_time(秒)},
+//        check_in_result/check_out_result（NoNeedCheck=无需另一侧卡）, task_shift_type }] }
+//     ——平台按班次把上下班卡配好成班段（fetchTaskSessions 消费，工作日 06:00 切天）；
+//   旧流水口径 user_flows/query 已随 v57 口径切换删除（runWeekly 走 user_tasks，
+//   旧流水两两配对仅保留在 import/http 兜底档的本地逻辑里）。
 //   GET  /open-apis/attendance/v1/groups —— 考勤组列表（组名→group_id 选组过滤用）
 //   通讯录 user_id：GET /contact/v3/users（user_id_type=user_id），需 employee_id 权限
 //
 // 权限前置（飞书后台开，报错 99991672 自带一键开通链接）：
-//   attendance:rule:readonly（考勤组）/ 打卡流水相关 scope / contact:user.employee_id:readonly
+//   attendance:rule:readonly（考勤组）/ attendance:task:readonly（打卡结果）/
+//   contact:user.employee_id:readonly
 // ============================================================
 const config = require('./config');
 const { getTenantAccessToken } = require('../feishu/client');
 
 const OPEN_API = 'https://open.feishu.cn/open-apis';
-const BATCH_USER_LIMIT = 50; // user_flows/query 单批 user_ids 上限=50（官方文档明示，2026-10-07 审查修正：原 100 超限）
+const BATCH_USER_LIMIT = 50; // user_tasks/query 单批 user_ids 上限=50（官方文档明示，2026-10-07 审查修正：原 100 超限）
 
 // 统一 JSON 解析：代理返 HTML 等非 JSON 响应时给可读错误（同 feishu/webhook.js 模式）
 async function readJson(res) {
@@ -37,7 +43,7 @@ function feishuAttError(code, msg) {
   return err;
 }
 
-// 通讯录全员（user_id 类型标识 + 姓名 + open_id）——供流水 user_ids、姓名映射与归档人员列
+// 通讯录全员（user_id 类型标识 + 姓名 + open_id）——供 user_tasks 查询 user_ids、姓名映射与归档人员列
 // 部门发现必须走 /departments/{id}/children 路径式接口（2026-10-26 修复）：根部门
 // department_id=0 的 users 列表恒为空（实测），旧实现靠用户 department_ids 反向发现，
 // 根部门拉不到人就永远发现不了任何子部门 → 返回 0 人（通讯录回落一直失效）。
@@ -151,7 +157,7 @@ async function fetchDeptRoster(deptId, token, seenUserIds) {
 // 用户组名单源（2026-10-12 新增正路）：考勤组建在飞书人事假勤域、标准考勤 API 永远不可见，
 // 曼波以「用户组」建考勤名单——成员走 GET /contact/v3/group/{id}/member/simplelist
 //（/user_groups/{id}/users 是 404 幻影端点，实测；响应键=data.memberlist 非 items）。
-// member_id_type=user_id（流水查询 employee_id 口径同形）；simplelist 不带姓名，逐个查
+// member_id_type=user_id（user_tasks 查询 employee_id 口径同形）；simplelist 不带姓名，逐个查
 // users/{user_id} 补 name + open_id（open_id=bitable 人员字段必需，随名单流转到归档）。
 // 组内「部门成员」（梆队/贝习等）接口不透出——ZKLINK_ROSTER_DEPT_IDS 指定部门 ID 额外拉全员合并。
 // 返回 { members: [{userid,name,openId}], groupId } ；组不存在/未配置返回 null。
@@ -268,44 +274,6 @@ async function resolveUserIds() {
   return { userIds: users.map((u) => u.userid), names: new Map(users.map((u) => [u.userid, u.name])) };
 }
 
-// 拉取窗口 [startMs, endMs) 的打卡流水（分批）→ 统一记录流
-async function fetchFlows(startMs, endMs) {
-  const { userIds, names } = await resolveUserIds();
-  const token = await getTenantAccessToken();
-  const records = [];
-  for (let i = 0; i < userIds.length; i += BATCH_USER_LIMIT) {
-    const batch = userIds.slice(i, i + BATCH_USER_LIMIT);
-    const qs = new URLSearchParams({ employee_type: 'employee_id' });
-    const res = await fetch(`${OPEN_API}/attendance/v1/user_flows/query?${qs}`, {
-      method: 'POST',
-      signal: AbortSignal.timeout(30000),
-      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-      body: JSON.stringify({
-        user_ids: batch,
-        check_time_from: String(Math.floor(startMs / 1000)),
-        check_time_to: String(Math.floor(endMs / 1000)),
-      }),
-    });
-    const j = await readJson(res);
-    if (j.code !== 0) throw feishuAttError(j.code, j.msg);
-    for (const f of ((j.data && j.data.user_flow_results) || [])) {
-      const t = Number(f.check_time);
-      if (!f.user_id || !t) continue; // 无时间/无人的脏记录跳过
-      records.push({
-        userid: String(f.user_id),
-        _name: names.get(String(f.user_id)) || String(f.user_id),
-        checkin_time: t, // 秒（与统一记录流口径一致）
-        checkin_type: String(f.comment || ''),
-        exception_type: f.check_result === 'Invalid' ? '无效打卡' : '',
-        location_title: String(f.location_name || ''),
-        wifiname: String(f.ssid || ''),
-        groupname: '飞书考勤',
-      });
-    }
-  }
-  return { records, userCount: userIds.length };
-}
-
 // 上海挂钟日期 YYYYMMDD（user_tasks 的 check_date_from/to 参数）
 function shanghaiYmd(ms) {
   const d = new Date(ms + 8 * 3600 * 1000);
@@ -407,4 +375,4 @@ async function fetchTaskSessions(startMs, endMs, opts = {}) {
   return { sessions, userCount: allIds.length, invalidUserIds, unauthorizedUserIds };
 }
 
-module.exports = { fetchFlows, fetchTaskSessions, listGroups, listUsersWithUserId, resolveUserIds, resolveGroupMembers };
+module.exports = { fetchTaskSessions, listGroups, listUsersWithUserId, resolveUserIds, resolveGroupMembers };

@@ -482,7 +482,7 @@ async function sendLastCall(options = {}) {
  * - 未做完成员生成下周补偿插入义务（已请假者在请假当时已生成）；
  * - 清空当日监听会话。
  * 写表动作不做静默延迟；返回的 notifications 由调用方决定直接发送或过闸门补发。
- * @returns {{date, results: Array, dayStatus, notifications: {photoOnly: Array, missNotices: Array, adminText: string}}}
+ * @returns {{date, results: Array, dayStatus, notifications: {missNotices: Array, adminText: string}}}
  */
 async function closeToday(options = {}) {
   const dryRun = Boolean(options.dryRun);
@@ -531,9 +531,8 @@ async function closeToday(options = {}) {
   }
 
   // 通知载荷（一次性事件通知：静默窗口内落盘补发）
-  const photoOnly = effective
-    .filter((r) => r.photos && r.status === config.status.MISS)
-    .map((r) => ({ name: r.name, position: r.position, openId: (roster.findByName(r.name) || {}).openId || '' }));
+  // photoOnly 数组已删（2026-11-05 死数据清理）：sendCloseNotifications 只认
+  // missNotices（元素带 photos 标记区分文案）与 adminText，photoOnly 从未被消费
   const missList = results.filter((r) => r.status === config.status.MISS);
   // 未做完者本人私信通知（2026-09-16：此前只有管理员摘要，未做完者本人毫无感知）
   const missNotices = results
@@ -553,7 +552,6 @@ async function closeToday(options = {}) {
     results,
     dayStatus,
     notifications: {
-      photoOnly,
       missNotices,
       adminText: adminLines.join('\n'),
     },

@@ -112,7 +112,10 @@
 （`QUIET_RETRY_BASE_MS` 起、指数退避至 15 分钟封顶、共 `QUIET_RETRY_MAX_ATTEMPTS` 次），
 重试若落进静默窗口推迟到窗口结束；重试耗尽转**失败补报账目**，网络恢复后的首个成功时机
 由 cron 注入的补报器私信管理员（补报成功才清账）；`/api/bot/cron-status` 的 quietHours
-段暴露 `pendingFailureReports` 与最近失败摘要。
+段暴露 `pendingFailureReports` 与最近失败摘要；`running` 判定=核心任务名齐备
+（2026-11-05 改口径：7 个固定名任务 + 提前预告按配置域展开的真实名；zklink 周报/
+watchdog 与 rosterFill 插件按配置启停不参与判定，`taskCount` 为原始任务数、
+`registeredTasks` 列在册任务名——旧 `tasks.length >= 6` 阈值判据会被可选任务数带偏）。
 
 ## 值日助手（指令，hub 转发）
 
@@ -258,6 +261,7 @@ npm run test:board      # 看板 webhook 通道（payload/签名/错误路径/�
 npm run test:express    # 快递助手（窗口/登记/配对/取件/播报/图片窗口守卫）
 npm run test:generate-place  # 排班生成补偿义务 placed 即时标记（中断不双倍补偿）
 npm run test:zklink-sessions  # 打卡结果平台配对（user_tasks / 06:00 切天 / 缺卡）
+npm run test:cron-status      # cron 状态口径（running=核心任务名齐备，可选任务不干扰）
 npm run test:roster-fill      # 梯队表考勤时长回填插件（组映射 / 只写时长列 / dry-run）
 npm run table:check     # 校验 .env 配置的表格字段是否符合约定
 npm run table:create    # 自动新建 Bitable+排班表（打印 app_token/table_id 供 .env 回填）

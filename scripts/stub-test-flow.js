@@ -227,7 +227,7 @@ function check(desc, cond, detail = '') {
   check('收口 dryRun：队员B/C 判未做完', close.results.filter((r) => r.status === '未做完').length === 2);
   const closed = await inquiry.closeToday();
   check('收口：当日总状态为空（缺凭证/未全做完）', closed.dayStatus === null, String(closed.dayStatus));
-  check('收口：photoOnly 名单含队员B', closed.notifications.photoOnly.some((p) => p.name === '队员B'));
+  check('收口：notifications 不再含 photoOnly（死数据已删，2026-11-05）', closed.notifications.photoOnly === undefined);
   check('收口：missNotices 覆盖全部未做完（B 有照片/C 无照片）', closed.notifications.missNotices.length === 2 && closed.notifications.missNotices.some((m) => m.name === '队员B' && m.photos) && closed.notifications.missNotices.some((m) => m.name === '队员C' && !m.photos), JSON.stringify(closed.notifications.missNotices));
   await inquiry.sendCloseNotifications(closed.notifications);
   const closeDm = memory.dmCalls.filter((c) => c.text.includes('已按「未做完」收口'));

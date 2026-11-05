@@ -187,6 +187,22 @@ function pendingRecords() {
   await express.handleImagePayload({ imageKey: 'k9', openId: 'ou_x9', messageId: 'm_img1', chatId: 'oc_express' });
   ok(pendingRecords().length === 1 && rawRecords[rawRecords.length - 1].fields['消息ID'] === 'm_img1', '窗口内直调：本群图片正常登记');
 
+  // 23. 登记<at>混排文字：日志与写入字段同源净化（2026-11-05）
+  //    放最后一条：不搅动前序用例的 pending/编号基线
+  const logLines = [];
+  const origLog = console.log;
+  console.log = (...a) => logLines.push(a.join(' '));
+  try {
+    await express.observe({ text: '<at user_id="ou_all">所有人</at> 88-6-1234', openId: 'ou_u1', messageId: 'm_at1', chatId: 'oc_express' });
+  } finally {
+    console.log = origLog;
+  }
+  const atRec = rawRecords[rawRecords.length - 1];
+  ok(atRec.fields['取件码'] === '所有人 88-6-1234', 'at 混排文字：取件码字段已剥 at 标签（内文本保留）');
+  const regLog = logLines.find((l) => l.includes('已登记取件码'));
+  ok(Boolean(regLog) && !regLog.includes('<at'), '登记日志已净化（与写入字段同源，不再打印原始 at 标签）');
+  ok(regLog.includes('88-6-1234'), '登记日志保留取件码本体');
+
   console.log(`\n结果：${pass} 通过 / 0 失败`);
   try { fs.unlinkSync(config.stateFile); } catch { /* 忽略 */ }
   process.exit(0);

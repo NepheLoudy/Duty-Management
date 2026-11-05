@@ -315,7 +315,9 @@ async function registerText({ text, openId, messageId }) {
   };
   if (openId) fields[f().senderUser] = [{ id: openId }]; // 发起人（用户主键，飞书自动显示姓名）
   await createExpressRecord(fields);
-  console.log(`[快递] 已登记取件码「${text}」（${openId ? senderOf(openId) : '未知'}）`);
+  // 日志与写入字段同源净化（2026-11-05）：原始 text 含 <at> 标签时原样打印，
+  // 后续随日志检索/控制台粘贴会把 at 语法带回聊天渲染 @人
+  console.log(`[快递] 已登记取件码「${stripAtTags(text)}」（${openId ? senderOf(openId) : '未知'}）`);
   return { handled: true, reply: '' };
 }
 
