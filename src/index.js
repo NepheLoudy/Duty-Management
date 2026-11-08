@@ -391,6 +391,18 @@ app.get('/api/attendance/preview', async (req, res) => {
   }
 });
 
+// ---- 打卡时长统计（2026-11-09 v70：运维台统计视图数据源，只读不播报、无 token 同 preview） ----
+// range=current → 本周至今（进行中，单边未收卡段标 ongoing 不算缺卡）；默认按播报窗口取整周
+app.get('/api/attendance/stats', async (req, res) => {
+  const range = req.query.range === 'current' ? 'current' : 'week';
+  const offset = Number(req.query.weekOffset || 0) || 0;
+  try {
+    res.json(await zklinkService.buildStatsPayload({ offset, range }));
+  } catch (err) {
+    res.status(502).json({ error: err.message, hint: err.hint || null });
+  }
+});
+
 // ---- 手动播报+留档（真发/dryRun，X-API-Token；当下主动触发不受静默限制） ----
 app.post('/api/attendance/test-broadcast', requireApiToken, async (req, res) => {
   const { weekOffset = 0, dryRun = false } = req.body || {};

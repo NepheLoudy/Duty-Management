@@ -30,15 +30,17 @@ function sendDowOrDefault() {
   return config.cronParts.dow == null ? 1 : config.cronParts.dow;
 }
 
-async function runWeekly({ offset = 0, dryRun = false, trigger = 'cron' } = {}) {
-  // 播报通道门控：webhook 未配置直接 NO_CONFIG（policy 窗口可见缺什么）
-  if (!config.webhookUrl) {
-    const err = new Error('未配置播报 webhook（ZKLINK_WEBHOOK_URL，缺省回落 DUTY_BOARD_WEBHOOK_URL）');
-    err.errcode = 'NO_CONFIG';
-    throw err;
-  }
+// ============================================================
+// 取数+聚合（唯一口径）：取窗口 → 按数据源拉记录 → 名单合并 → aggregate。
+// 播报链（runWeekly）与统计视图（buildStatsPayload）共用，两边算法不得分叉。
+// range='current' 为本周至今（进行中，统计视图专用）；默认按播报窗口取整周。
+// 不校验 webhook、不触发送/留档/水位——那都是 runWeekly 的事。
+// ============================================================
+async function collectWeekly({ offset = 0, range = 'week' } = {}) {
   let members = store.loadMembers();
-  const win = report.weekWindow(offset, Date.now(), sendDowOrDefault());
+  const win = range === 'current'
+    ? report.currentWeekWindow(Date.now())
+    : report.weekWindow(offset, Date.now(), sendDowOrDefault());
   let records;
   if (config.dataSource === 'import') {
     // 数据源=ZKLink 网页端导出的打卡明细（http 通道端点校准前不切，同 wecom 方案4 取舍）
@@ -108,6 +110,17 @@ async function runWeekly({ offset = 0, dryRun = false, trigger = 'cron' } = {}) 
   if (config.dataSource === 'feishu') {
     console.log(`[打卡周报] 平台班段：${agg.totals.completeSessions} 段有效（${agg.totals.missingSessions} 段缺卡），${agg.totals.punchUsers}/${agg.totals.users} 人有打卡`);
   }
+  return { win, members, records, agg };
+}
+
+async function runWeekly({ offset = 0, dryRun = false, trigger = 'cron' } = {}) {
+  // 播报通道门控：webhook 未配置直接 NO_CONFIG（policy 窗口可见缺什么）
+  if (!config.webhookUrl) {
+    const err = new Error('未配置播报 webhook（ZKLINK_WEBHOOK_URL，缺省回落 DUTY_BOARD_WEBHOOK_URL）');
+    err.errcode = 'NO_CONFIG';
+    throw err;
+  }
+  const { win, records, agg } = await collectWeekly({ offset });
   const csv = report.renderCsv(win, agg);
   const filename = `打卡时长周报_${win.label.replace(/ ~ /g, '_')}.csv`;
 
@@ -191,6 +204,90 @@ async function runWeekly({ offset = 0, dryRun = false, trigger = 'cron' } = {}) 
   return { window: win, agg, csv, filename, sent: true, totals: agg.totals };
 }
 
+// ============================================================
+// 统计视图载荷（2026-11-09 v70：运维台「打卡时长统计」视图数据源，只读不播报）
+// totals + 逐人（逐日 days[] + 逐班段 sessionDetails[]；时刻串服务端预格式化，防浏览器时区坑）。
+// 进行中段：range=current 时「今天已有上班卡、还没下班卡」的单边段不算缺卡（ongoing=true 单独
+// 计数，视图标「进行中」），避免把正在上班的人误报成缺卡；pairs 档（import/http）无平台班段
+// 概念，sessionDetails 恒空、视图只给逐日合计。
+// ============================================================
+async function buildStatsPayload({ offset = 0, range = 'week' } = {}) {
+  const { win, members, agg } = await collectWeekly({ offset, range });
+  const isCurrent = range === 'current';
+  const today = report.fmtDay(Date.now() + report.SHANGHAI_OFFSET_MS);
+  const mode = agg.mode || 'pairs';
+
+  const users = (agg.users || []).map((u) => {
+    const sessionDetails = mode !== 'sessions' ? [] : (agg.rawRecords || [])
+      .filter((s) => s && String(s.userid) === String(u.userid))
+      .sort((a, b) => (a.checkin_time || a.checkout_time || 0) - (b.checkin_time || b.checkout_time || 0))
+      .map((s) => {
+        const ongoing = isCurrent && !s.complete && s.checkin_time && !s.checkout_time && s.day === today;
+        return {
+          day: s.day,
+          inClock: s.checkin_time ? report.fmtClock(s.checkin_time * 1000) : null,
+          outClock: s.checkout_time ? report.fmtClock(s.checkout_time * 1000) : null,
+          durationMin: Math.round((Number(s.durationMs) || 0) / 60000),
+          complete: !!s.complete,
+          missing: !s.complete && s.missing !== false && !ongoing,
+          ongoing,
+          crossDay: !!s.cross_day,
+        };
+      });
+    const ongoingCount = sessionDetails.filter((s) => s.ongoing).length;
+    const dayOngoing = (day) => sessionDetails.filter((s) => s.ongoing && s.day === day).length;
+    return {
+      userid: u.userid,
+      name: u.name,
+      punchDays: u.punchDays,
+      punches: u.punches,
+      sessions: u.sessions || 0,
+      completeSessions: u.completeSessions || 0,
+      missingSessions: Math.max(0, (u.missingSessions || 0) - ongoingCount),
+      ongoingSessions: ongoingCount,
+      totalMs: u.totalMs,
+      days: (u.days || []).map((d) => ({
+        day: d.day,
+        firstClock: d.first != null ? report.fmtClock(d.first) : d.firstClock || null,
+        lastClock: d.last != null ? report.fmtClock(d.last) : d.lastClock || null,
+        count: d.count,
+        durationMin: Math.round((d.durationMs || 0) / 60000),
+        sessions: d.sessions || 0,
+        completeSessions: d.completeSessions || 0,
+        missingSessions: Math.max(0, (d.missingSessions || 0) - dayOngoing(d.day)),
+        ongoing: dayOngoing(d.day) > 0,
+      })),
+      sessionDetails,
+    };
+  });
+
+  const totalOngoing = users.reduce((n, u) => n + u.ongoingSessions, 0);
+  const totals = {
+    ...agg.totals,
+    mode, // aggregateDuration 的 totals 不带 mode，这里统一补齐（前端契约：totals.mode 恒存在）
+    missingSessions: Math.max(0, (agg.totals.missingSessions || 0) - totalOngoing),
+    ongoingSessions: totalOngoing,
+  };
+
+  return {
+    ok: true,
+    dataSource: config.dataSource,
+    mode,
+    range: isCurrent ? 'current' : 'week',
+    weekOffset: isCurrent ? null : offset,
+    window: {
+      label: win.label,
+      key: win.key,
+      start: new Date(win.start).toISOString(),
+      end: new Date(win.end).toISOString(),
+    },
+    generatedAt: new Date().toISOString(),
+    memberCount: members.length,
+    totals,
+    users,
+  };
+}
+
 async function guardedRun(opts) {
   if (running) return { skipped: true, reason: '上一轮还在跑' };
   running = true;
@@ -252,4 +349,4 @@ async function watchdogTick() {
   await guardedRun({ trigger: 'watchdog' });
 }
 
-module.exports = { runWeekly, guardedRun, catchupNeeded, watchdogTick };
+module.exports = { runWeekly, guardedRun, catchupNeeded, watchdogTick, buildStatsPayload };

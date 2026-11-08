@@ -93,6 +93,22 @@ function weekWindow(offset = 0, nowMs = Date.now(), sendDow = 1) {
   };
 }
 
+// 本周至今窗口（统计视图专用，2026-11-09）：本周一 00:00（上海）→ now，进行中不封口。
+// 播报链不用——播报窗口永远是「已结束的完整周」，这里给「打开即看现在打到哪」的视图用。
+function currentWeekWindow(nowMs = Date.now()) {
+  const startReal = currentAnchor(nowMs, 1); // sendDow=1 → 本周一 00:00（周一当天=今天零点）
+  const startWall = toWall(startReal);
+  const endWall = toWall(nowMs);
+  return {
+    start: startReal,
+    end: nowMs,
+    startWall,
+    endWall,
+    label: `${fmtDay(startWall)} ~ ${fmtDay(endWall)}（进行中）`,
+    key: `current-${fmtDay(startWall)}`, // 进行中窗口不参与播报水位，key 仅用于展示去重
+  };
+}
+
 // 判断 now 是否已过「发送日 D 的 HH:MM」（用于重启补发判定）
 function isPastSendTime(nowMs, sendDow, hour, minute) {
   const anchorReal = currentAnchor(nowMs, sendDow);
@@ -367,6 +383,7 @@ module.exports = {
   SHANGHAI_OFFSET_MS,
   DAY_MS,
   weekWindow,
+  currentWeekWindow,
   currentAnchor,
   isPastSendTime,
   nextSendTime,
