@@ -737,3 +737,13 @@
 - **P3 photoOnly 死数据**：closeToday 返回结构中从未被消费的 photoOnly 数组删除（sendCloseNotifications 只认 missNotices/adminText）。
 - **P3 express 日志净化**：registerText 日志改用 stripAtTags 净化后的取件码（与写入字段同源）。
 - **测试**：13 套全绿（12 原套 + cron-status 14 断言）。
+## v70 · 2026-11-09 · 随本提交落地 · feat
+
+**打卡时长统计与明细查看（千里运维台集成，「打开即自动统计」，曼波点名）**
+
+- **取数口径收拢**：runWeekly 开头「取窗口→按数据源拉记录→名单合并→聚合」整块抽成 collectWeekly({offset, range})（service.js）——播报链与统计共用唯一取数口径，算法不得分叉（伴随核查逐字比对 HEAD 确认行为保持）；webhook 门控留在 runWeekly，统计视图不依赖播报配置。
+- **本周至今窗口**：report.js 新增 currentWeekWindow(nowMs)——本周一 00:00（上海）→ now 进行中不封口（key=current-<周一日期>，不参与播报水位）；伴随核查跨周一/三/日边界验证 start 恒为本周一。
+- **统计载荷**：service.js 新增 buildStatsPayload({offset, range})——totals + 逐人 days[] 逐日合计 + sessionDetails[] 逐班段（时刻服务端 fmtClock 预格式化，防浏览器时区坑）；range=current 时「今天已打上班卡未收下班卡」的单边段标 ongoing，user/day/totals 三级缺卡扣减（进行中不误报缺卡）；pairs 档（import/http）sessionDetails 恒空、totals.mode 统一补齐。index.js 新增 GET /api/attendance/stats（只读无 token，同 preview 档）。
+- **运维台集成（qianli/dashboard）**：server.js 代理路由（SSH→:3006 curl，55s/60s 长超时，range/offset 白名单化防注入；不设缓存=打开即统计语义）；registry duty 窗口加 attendance-stats 项（quickActions 测试套数 20→22 顺手改准）；index.html 抽屉富 UI——周选择器（本周至今/最近完整统计周/前 1~3 周）+ KPI 条 + 逐人表格按时长排序 + 点行展开逐日合计与班段明细（缺卡红/进行中/跨天徽标），打开自动统计、换周重算、可手动重新统计。
+- **测试**：新增 scripts/stub-test-attendance-stats.js 23 断言（current/week 双窗口、ongoing 扣减、名单内零记录兜底、pairs 降级；日期全部相对锚点动态生成——「周一清早窗口刚开几分钟」实测翻车过一次后改固定上上周窗口，防日期敏感）；npm test 22 套全绿（344 ✅）。
+- **已知口径**：NoNeedCheck 单边卡在当周视图会标「进行中」（本就非缺卡，扣减经 Math.max(0,…) 钳制无计数副作用）；端到端实测 20s 返回（SSH+飞书现算），上周窗口 69/72 人打卡 372 段 2383h 形状正确。

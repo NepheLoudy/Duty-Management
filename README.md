@@ -230,6 +230,7 @@ watchdog 与 rosterFill 插件按配置启停不参与判定，`taskCount` 为�
 | POST | `/api/attendance/members` | 打卡播报名单增删 `{action:add/remove, userid, name}`（X-API-Token） |
 | POST | `/api/attendance/import` | 打卡明细导入 `{dataBase64, filename?}`（X-API-Token；解析入库+名单自动合并） |
 | GET | `/api/attendance/preview?weekOffset=N` | 打卡周报干跑预览（拉数渲染不发送，含云文档块数） |
+| GET | `/api/attendance/stats?range=current\|week&weekOffset=N` | 打卡时长统计（2026-11-09 v70，只读；运维台统计视图数据源——`range=current`=本周至今进行中窗口，当周未收卡的单边段计 `ongoing` 不算缺卡；返回 totals+逐人 `days[]` 逐日+`sessionDetails[]` 逐班段，时刻已按上海预格式化） |
 | POST | `/api/attendance/test-broadcast` | 打卡周报手动播报+留档 `{dryRun?, weekOffset?}`（X-API-Token） |
 
 ## 配置
