@@ -11,6 +11,8 @@ const path = require('path');
 const config = require('./config');
 const { getTenantAccessToken } = require('../feishu/client');
 const report = require('./report');
+// passRule 不在顶部 require：它与本模块互相依赖（passRule 顶部 require 本模块取 resolveDocToken），
+// 顶部双 require 会因本模块替换式导出让 passRule 拿到空引用——延迟到调用点加载（见 archiveToBitable）
 
 const OPEN_API = 'https://open.feishu.cn/open-apis';
 
@@ -220,30 +222,48 @@ async function archiveToBitable(win, agg, appToken) {
   }
 
   const openIdMap = await fetchOpenIdMap(); // 名单不带 openId 时的兜底映射
+  // 三档及格判定上下文（2026-11-09 v71）：启用且表有 checkbox 列才拉花名册；失败降级=本轮不写 pass 列
+  const passRule = require('./passRule'); // 延迟 require：与本模块互相依赖，见文件头注释
+  let passCtx = null;
+  if (fields.pass && passRule.passEnabled()) {
+    try {
+      passCtx = await passRule.loadGradeMap();
+      console.log('[打卡留档] 及格判定启用：花名册 ' + passCtx.count + ' 人（核心 ' + config.passRules.core + 'h / 正式 ' + config.passRules.formal + 'h / 梯队 ' + config.passRules.echelon + 'h）');
+    } catch (e) {
+      console.warn('[打卡留档] 花名册拉取失败，本轮不写「是否及格」列（' + e.message + '）');
+    }
+  }
   const creates = [];
   const updates = [];
   const noOpenId = [];
+  const ungraded = [];
   for (const u of agg.users) {
     const oid = u.openId || openIdMap[u.userid] || '';
     if (!oid) noOpenId.push(u.name);
     const fieldsBody = {};
     if (oid) fieldsBody[userField] = [{ id: oid }];
     fieldsBody[durField] = report.fmtDuration(u.totalMs);
-    if (fields.pass && config.passHours > 0) fieldsBody[fields.pass.field_name] = u.totalMs >= config.passHours * 3600 * 1000;
+    if (passCtx) {
+      const j = passRule.judgePass({ name: u.name, openId: oid, totalMs: u.totalMs }, passCtx);
+      if (j) fieldsBody[fields.pass.field_name] = j.pass;
+      else ungraded.push(u.name); // 花名册外/无档位：留空不判定（人工值不动）
+    }
     if (weekField && weekNum != null) fieldsBody[weekField] = weekNum;
 
     const hit = (oid && byOpenId.get(oid)) || byName.get(u.name) || null;
     if (!hit) { creates.push({ fields: fieldsBody }); continue; }
     const patch = {};
     if (String((hit.fields || {})[durField] || '') !== fieldsBody[durField]) patch[durField] = fieldsBody[durField];
-    if (fields.pass && config.passHours > 0 && (hit.fields || {})[fields.pass.field_name] !== fieldsBody[fields.pass.field_name]) {
-      patch[fields.pass.field_name] = fieldsBody[fields.pass.field_name];
+    if (passCtx && fieldsBody[fields.pass.field_name] !== undefined
+      && (hit.fields || {})[fields.pass.field_name] !== fieldsBody[fields.pass.field_name]) {
+      patch[fields.pass.field_name] = fieldsBody[fields.pass.field_name]; // 幂等纠错：人工误勾自动重算（值变才写）
     }
     const hp = personCell(hit.fields, userField);
     if (oid && !hp.id) patch[userField] = [{ id: oid }]; // 老行人员列留空（可见范围外）→ 补全
     if (Object.keys(patch).length) updates.push({ record_id: hit.record_id, fields: patch });
   }
   if (noOpenId.length) console.warn(`[打卡留档] ${noOpenId.length} 人不在通讯录可见范围、人员列留空：${noOpenId.join('、')}（名单源修复后可重置归档水位补全）`);
+  if (passCtx && ungraded.length) console.warn(`[打卡留档] ${ungraded.length} 人不在花名册/无档位、「是否及格」留空：${ungraded.join('、')}`);
 
   for (let i = 0; i < creates.length; i += 500) {
     await bitableCall(appToken, `${tableId}/records/batch_create`, {

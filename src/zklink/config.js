@@ -71,8 +71,18 @@ const config = {
   archiveLinkBase: process.env.ZKLINK_ARCHIVE_LINK_BASE || '',
   // 学期第 1 周周一（YYYY-MM-DD）——归档「第几周」列起算锚点（2026-10-12 曼波定：当日为第 6 周 → 起点 2026-09-14）
   week1Start: process.env.ZKLINK_WEEK1_START || '',
-  // 周时长及格线（小时，正数）——归档「是否及格」列判定；未配置/0=不写该列（口径待曼波，系统较复杂）
-  passHours: (() => { const n = Number(process.env.ZKLINK_PASS_HOURS); return Number.isFinite(n) && n > 0 ? n : 0; })(),
+  // 周时长及格线（2026-11-09 曼波定三档口径：核心 45 / 正式 35 / 梯队 20，按「三级认定」档位判定）。
+  // 启用条件=三键任一 >0 且分档表（花名册）定位可读；均未配置=不写「是否及格」列（维持旧行为）。
+  // 花名册外的人（访客等）不判定留空。旧单一线键 ZKLINK_PASS_HOURS 已废止（从未启用过）。
+  passRules: {
+    core: (() => { const n = Number(process.env.ZKLINK_PASS_HOURS_CORE); return Number.isFinite(n) && n > 0 ? n : 0; })(),
+    formal: (() => { const n = Number(process.env.ZKLINK_PASS_HOURS_FORMAL); return Number.isFinite(n) && n > 0 ? n : 0; })(),
+    echelon: (() => { const n = Number(process.env.ZKLINK_PASS_HOURS_ECHELON); return Number.isFinite(n) && n > 0 ? n : 0; })(),
+  },
+  // 分档表（27赛季花名册，2026-11-09 曼波给）：wiki 节点 token + 数据表 id；
+  // 「三级认定」列（单选：核心/正式/梯队）为档位真源，「人员」列 open_id 匹配优先、姓名兜底。
+  gradeRosterWikiToken: process.env.ZKLINK_GRADE_WIKI_TOKEN || '',
+  gradeRosterTableId: process.env.ZKLINK_GRADE_TABLE_ID || '',
 
   // 考勤白名单（2026-10-26 曼波定）：免打卡/不记入打卡周报的人名清单。
   // 与值日白名单（config/whitelist.json）**不是同一份**——值日白名单里既有免考勤的顾问/正式，

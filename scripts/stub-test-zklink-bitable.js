@@ -6,7 +6,8 @@
  *     ①wiki 节点 objType=bitable 分派进表格分支（docx API 不再被误调）；
  *     ②字段按 type 识别（11 人员/1 时长文本/7 及格/2 周数，字段名无关）；
  *     ③「第几周」按 ZKLINK_WEEK1_START 锚点换算（2026-09-14 起，2026-10-05 窗口=第 5 周）；
- *     ④及格列按 ZKLINK_PASS_HOURS 判定（11h→true / 8h→false）；
+ *     ④及格列按三档线判定（2026-11-09 v71：核心 45/正式 35/梯队 20，档位查花名册「三级认定」；
+ *       花名册外的人不判定留空；人工误勾值由幂等重算自动纠错——韦可屹冤案回归）；
  *     ⑤通讯录可见范围外的人（无 open_id）人员列留空但行照写（不阻塞归档）；
  *     ⑥同周按人幂等 upsert（2026-10-26）：已存在的人不重复建行、时长变化走 batch_update、
  *       名单修正后缺的人补建（原「同周有行即整周跳过」让补人失效）。
@@ -22,7 +23,12 @@ process.env.APP_SECRET = 'sec_test';
 process.env.ZKLINK_ARCHIVE_DOC_TOKEN = 'NFUtestwikitoken';
 process.env.ZKLINK_ARCHIVE_TABLE_ID = 'tblTEST';
 process.env.ZKLINK_WEEK1_START = '2026-09-07';
-process.env.ZKLINK_PASS_HOURS = '10';
+// 三档及格线（2026-11-09 v71）：核心 45 / 正式 35 / 梯队 20；档位真源=花名册 mock（tblGRADE）
+process.env.ZKLINK_PASS_HOURS_CORE = '45';
+process.env.ZKLINK_PASS_HOURS_FORMAL = '35';
+process.env.ZKLINK_PASS_HOURS_ECHELON = '20';
+process.env.ZKLINK_GRADE_WIKI_TOKEN = 'wikigradetoken';
+process.env.ZKLINK_GRADE_TABLE_ID = 'tblGRADE';
 process.env.ZKLINK_DATA_DIR = path.join(os.tmpdir(), `zklink-bitable-test-${Date.now()}`);
 
 const realFetch = global.fetch;
@@ -39,7 +45,26 @@ global.fetch = async (url, opts = {}) => {
   const u = String(url);
   calls.push(u);
   if (u.includes('/auth/v3/tenant_access_token')) return jsonResponse({ code: 0, tenant_access_token: 'T', expire: 7200 });
-  if (u.includes('/wiki/v2/spaces/get_node')) return jsonResponse({ code: 0, data: { node: { obj_token: 'APPBITABLE', obj_type: 'bitable', title: '打卡记录' } } });
+  if (u.includes('/wiki/v2/spaces/get_node')) {
+    // 按 token 分流：归档表（打卡记录）vs 分档花名册（27赛季花名册）
+    return jsonResponse({ code: 0, data: { node: u.includes('NFUtestwikitoken')
+      ? { obj_token: 'APPBITABLE', obj_type: 'bitable', title: '打卡记录' }
+      : { obj_token: 'APPGRADE', obj_type: 'bitable', title: '27赛季花名册' } } });
+  }
+  if (u.includes('/bitable/v1/apps/APPGRADE/tables/tblGRADE/fields')) {
+    return jsonResponse({ code: 0, data: { items: [
+      { field_id: 'gGrade', field_name: '三级认定', type: 3 },
+      { field_id: 'gUser', field_name: '人员', type: 11 },
+      { field_id: 'gName', field_name: '姓名', type: 1 },
+    ] } });
+  }
+  if (u.includes('/tables/tblGRADE/records')) {
+    return jsonResponse({ code: 0, data: { items: [
+      { fields: { '三级认定': '核心', '人员': [{ id: 'ou_zhang' }], '姓名': '张三' } },
+      { fields: { '三级认定': '梯队', '人员': [{ id: 'ou_li' }], '姓名': '李四' } },
+      { fields: { '三级认定': '正式', '人员': [{ id: 'ou_zhao' }], '姓名': '赵六' } },
+    ], has_more: false } });
+  }
   if (u.includes('/bitable/v1/apps/APPBITABLE/tables/tblTEST/fields')) {
     return jsonResponse({ code: 0, data: { items: [
       { field_id: 'fUser', field_name: '文本', type: 11 },
@@ -99,18 +124,18 @@ const agg = {
   check('三人各写一行', r.appended === 3, `appended=${r.appended}`);
   check('batch_create 恰一调用（≤500 单批）', batchPayloads.length === 1);
   const rows = (batchPayloads[0] && batchPayloads[0].records) || [];
-  check('第 1 行：人员列=open_id + 时长文本 + 及格true + 周数5', (() => {
+  check('第 1 行：人员列=open_id + 时长文本 + 三档判定(核心11h<45h=false) + 周数5', (() => {
     const f = rows[0] && rows[0].fields;
-    return f && f['文本'] && f['文本'][0].id === 'ou_zhang' && f['该周时长'] === '11小时' && f['是否及格'] === true && f['第几周'] === 5;
+    return f && f['文本'] && f['文本'][0].id === 'ou_zhang' && f['该周时长'] === '11小时' && f['是否及格'] === false && f['第几周'] === 5;
   })(), JSON.stringify(rows[0]));
-  check('第 2 行：8h 判不及格', rows[1] && rows[1].fields['是否及格'] === false && rows[1].fields['第几周'] === 5, JSON.stringify(rows[1]));
+  check('第 2 行：8h 梯队(<20h)判不及格', rows[1] && rows[1].fields['是否及格'] === false && rows[1].fields['第几周'] === 5, JSON.stringify(rows[1]));
   console.log('== 2. 可见范围外人员降级 ==');
-  check('李子杰无 open_id：人员列留空但行照写（时长/周数在）', rows[2] && !rows[2].fields['文本'] && rows[2].fields['该周时长'] === '2小时39分钟' && rows[2].fields['第几周'] === 5, JSON.stringify(rows[2]));
+  check('李子杰无 open_id：人员列留空但行照写（时长/周数在，花名册外不判定及格留空）', rows[2] && !rows[2].fields['文本'] && rows[2].fields['该周时长'] === '2小时39分钟' && rows[2].fields['第几周'] === 5 && rows[2].fields['是否及格'] === undefined, JSON.stringify(rows[2]));
   console.log('== 3. 同周按人 upsert（已存在的不重建、时长变化更新、缺的人补建） ==');
   batchPayloads.length = 0;
   updatePayloads.length = 0;
   existingWeekRows = [
-    { record_id: 'r_zhang', fields: { '文本': [{ id: 'ou_zhang', name: '张三' }], '该周时长': '11小时', '是否及格': true, '第几周': 5 } },
+    { record_id: 'r_zhang', fields: { '文本': [{ id: 'ou_zhang', name: '张三' }], '该周时长': '11小时', '是否及格': false, '第几周': 5 } }, // 勾选值与新判定一致（核心 11h<45h）
     { record_id: 'r_li', fields: { '文本': [{ id: 'ou_li', name: '李四' }], '该周时长': '5小时', '是否及格': false, '第几周': 5 } },
   ];
   const r2 = await feishuDoc.archiveToDoc(win, agg, [], { dataSource: 'feishu' });
@@ -124,11 +149,30 @@ const agg = {
     const row = updatePayloads[0] && updatePayloads[0].records[0];
     return row && row.record_id === 'r_li' && row.fields['该周时长'] === '8小时' && row.fields['是否及格'] === undefined;
   })(), JSON.stringify(updatePayloads[0]));
+  console.log('== 3c. 人工误勾自动纠错（韦可屹冤案回归：判定值与表值不一致时幂等 patch） ==');
+  batchPayloads.length = 0;
+  updatePayloads.length = 0;
+  existingWeekRows = [
+    { record_id: 'r_zhang', fields: { '文本': [{ id: 'ou_zhang', name: '张三' }], '该周时长': '11小时', '是否及格': true, '第几周': 5 } }, // 误勾 true（核心 11h < 45h）
+    { record_id: 'r_li', fields: { '文本': [{ id: 'ou_li', name: '李四' }], '该周时长': '8小时', '是否及格': false, '第几周': 5 } },
+  ];
+  const r4 = await feishuDoc.archiveToDoc(win, agg, [], { dataSource: 'feishu' });
+  check('误勾被纠错：张三 true→false 走 batch_update', r4.updated === 1 && updatePayloads.length === 1, JSON.stringify({ updated: r4.updated, updates: updatePayloads.length }));
+  check('纠错目标=张三行且只改是否及格（时长未变不动）', (() => {
+    const row = updatePayloads[0] && updatePayloads[0].records[0];
+    return row && row.record_id === 'r_zhang' && row.fields['是否及格'] === false && row.fields['该周时长'] === undefined;
+  })(), JSON.stringify(updatePayloads[0]));
+  existingWeekRows[0].fields['是否及格'] = false; // 表值已被纠错
+  existingWeekRows.push({ record_id: 'r_lz', fields: { '文本': [{ id: 'ou_lz', name: '李子杰' }], '该周时长': '2小时39分钟', '第几周': 5 } }); // 花名册外的人行也在（pass 留空）
+  batchPayloads.length = 0;
+  updatePayloads.length = 0;
+  const r5 = await feishuDoc.archiveToDoc(win, agg, [], { dataSource: 'feishu' });
+  check('纠错后再跑 → 完全幂等 0 写入', r5.appended === 0 && r5.updated === 0 && updatePayloads.length === 0, JSON.stringify({ appended: r5.appended, updated: r5.updated, updates: updatePayloads.length }));
   console.log('== 3b. 再跑一次完全幂等（无建行/无更新） ==');
   batchPayloads.length = 0;
   updatePayloads.length = 0;
   existingWeekRows = [
-    { record_id: 'r_zhang', fields: { '文本': [{ id: 'ou_zhang', name: '张三' }], '该周时长': '11小时', '是否及格': true, '第几周': 5 } },
+    { record_id: 'r_zhang', fields: { '文本': [{ id: 'ou_zhang', name: '张三' }], '该周时长': '11小时', '是否及格': false, '第几周': 5 } },
     { record_id: 'r_li', fields: { '文本': [{ id: 'ou_li', name: '李四' }], '该周时长': '8小时', '是否及格': false, '第几周': 5 } },
     { record_id: 'r_lz', fields: { '文本': [{ id: 'ou_lz', name: '李子杰' }], '该周时长': '2小时39分钟', '是否及格': false, '第几周': 5 } },
   ];
