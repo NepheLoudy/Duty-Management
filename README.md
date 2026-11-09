@@ -160,6 +160,11 @@ watchdog 与 rosterFill 插件按配置启停不参与判定，`taskCount` 为�
 - **云文档留档**：wiki 节点 `obj_type=docx` 时每周一节（heading2 周标题 → 口径/合计 → 本周汇总逐人 →
   打卡明细逐条）；`obj_type=bitable`（现网「打卡记录」）时按人每周一行，同周按人 upsert——
   缺的人补建、时长/及格变化更新（v64）、其余不动，重跑幂等；
+- **三档及格判定**（2026-11-09 v71 曼波定：核心 45 / 正式 35 / 梯队 20 小时/周）：`ZKLINK_PASS_HOURS_CORE/FORMAL/ECHELON`
+  三键 + `ZKLINK_GRADE_WIKI_TOKEN`/`ZKLINK_GRADE_TABLE_ID`（档位真源=27赛季花名册「三级认定」列）配齐后，
+  归档时自动重算「是否及格」列——open_id 匹配优先（免疫重名）、姓名兜底，花名册外/无档位者留空不判定，
+  人工误勾值随重算自动纠正（值变才 patch）；判定失败降级=本轮不写该列、不炸播报；历史补勾走
+  `scripts/backfill-pass-column.js`（dryRun 缺省、`--confirm` 实写，幂等可重跑）；
   `ZKLINK_ARCHIVE_DOC_TOKEN` 兼容 wiki 节点 token（自动 get_node 换算，需应用 wiki 只读权限）
   与 docx token；应用身份复用 `APP_ID/APP_SECRET`（需 docx 权限 + 应用被加为文档协作者）；
   未配置时本地兜底、卡片照发；本地 `duty-bot-data/zklink/archive/` 每周落盘 JSON 全量 + CSV；

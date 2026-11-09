@@ -747,3 +747,13 @@
 - **运维台集成（qianli/dashboard）**：server.js 代理路由（SSH→:3006 curl，55s/60s 长超时，range/offset 白名单化防注入；不设缓存=打开即统计语义）；registry duty 窗口加 attendance-stats 项（quickActions 测试套数 20→22 顺手改准）；index.html 抽屉富 UI——周选择器（本周至今/最近完整统计周/前 1~3 周）+ KPI 条 + 逐人表格按时长排序 + 点行展开逐日合计与班段明细（缺卡红/进行中/跨天徽标），打开自动统计、换周重算、可手动重新统计。
 - **测试**：新增 scripts/stub-test-attendance-stats.js 23 断言（current/week 双窗口、ongoing 扣减、名单内零记录兜底、pairs 降级；日期全部相对锚点动态生成——「周一清早窗口刚开几分钟」实测翻车过一次后改固定上上周窗口，防日期敏感）；npm test 22 套全绿（344 ✅）。
 - **已知口径**：NoNeedCheck 单边卡在当周视图会标「进行中」（本就非缺卡，扣减经 Math.max(0,…) 钳制无计数副作用）；端到端实测 20s 返回（SSH+飞书现算），上周窗口 69/72 人打卡 372 段 2383h 形状正确。
+## v71 · 2026-11-09 · 随本提交落地 · feat
+
+**三档及格线自动勾选（曼波定口径：核心 45 / 正式 35 / 梯队 20 小时/周）**
+
+- **口径落地**：config.js 新增 passRules 三键（ZKLINK_PASS_HOURS_CORE/FORMAL/ECHELON）+ 分档表定位（ZKLINK_GRADE_WIKI_TOKEN/ZKLINK_GRADE_TABLE_ID）；旧单一线键 ZKLINK_PASS_HOURS 废止（从未启用）。档位真源=27赛季花名册 bitable「三级认定」列（核心 20/正式 9/梯队 39/顾问 6）。
+- **passRule.js 新模块**：loadGradeMap（open_id 匹配优先免疫重名、姓名兜底，5 分钟缓存）+ judgePass（花名册外/无档位/该档无线 → null 不判定留空）+ passEnabled 门控；判定失败降级=本轮不写列、不炸播报主链。
+- **归档链接线**：archiveToBitable 拉花名册逐人判定写「是否及格」，幂等 patch（值变才写）——人工误勾自动纠错；feishuDoc↔passRule 循环依赖用延迟 require 解开（替换式导出会拿空引用，文件头注释立规）。
+- **历史补勾**：scripts/backfill-pass-column.js（dryRun 缺省 --confirm 实写，幂等可重跑）逐周走播报同口径取数→archiveToDoc 分派写表，不发 webhook 不动水位；week1~week9 全量补齐，附带历史周时长刷新为平台当前真值。
+- **测试**：stub-test-pass-rule.js 23 断言（三档取线/门控/花名册解析含分页 trim 缓存/judgePass 九分支）；stub-test-zklink-bitable 17 断言适配三档契约+新增「误勾自动纠错」回归；npm test 23 套 542 项全绿。
+- **实证**：补勾后全表 9 周收敛（week9 55 达标/14 未达标/3 花名册外留空）；韦可屹九周线 0×5→32h→11h→42h(差2.6h)→63h33m 首次达标 true；撤销「韦可屹冤案」误判——他核心档 42h23m<45h 人工勾 false 本就正确，错在主线发言按正式线估算。
