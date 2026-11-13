@@ -144,7 +144,7 @@ watchdog 与 rosterFill 插件按配置启停不参与判定，`taskCount` 为�
 - 每小时整点自动播报未取清单（过晚间静默闸门，冲刷以补发时刻最新数据重查；无未取不发）。
 - 配置：`EXPRESS_GROUP_CHAT_IDS`（留空回落值日管辖群）/ `EXPRESS_WINDOW_MINUTES`（默认 5）/
   `EXPRESS_BROADCAST_SCHEDULE` / `EXPRESS_TABLE_ID`（默认已内置）/ `EXPRESS_ENABLED`。
-- 桩测试：`scripts/stub-test-express.js`（29 项：窗口/登记/配对/去重/编号/取件/播报）。
+- 桩测试：`scripts/stub-test-express.js`（38 项：窗口/登记/配对/去重/编号/取件/播报等）。
 
 ## ZKLink 打卡时长周报（2026-10-07 v48 归并，src/zklink/）
 
@@ -269,6 +269,10 @@ npm run test:generate-place  # 排班生成补偿义务 placed 即时标记（�
 npm run test:zklink-sessions  # 打卡结果平台配对（user_tasks / 06:00 切天 / 缺卡）
 npm run test:cron-status      # cron 状态口径（running=核心任务名齐备，可选任务不干扰）
 npm run test:roster-fill      # 梯队表考勤时长回填插件（组映射 / 只写时长列 / dry-run）
+npm run test:quiet-flush      # 晚间静默冲刷竞态回归（2026-10-10 自 ticket-bot 同批移植）
+npm run test:attendance-stats # 打卡时长统计载荷（v70：totals+逐人逐日+逐班段 / ongoing 不算缺卡 / pairs 档降级）
+npm run test:pass-rule        # 三档及格线判定（v71：三档取线 / 花名册 open_id+姓名双映射 / judgePass 门控）
+npm run test:midnight-accept  # 值日验收跨零点（2026-10-22 收口 24:00→次日 04：凌晨 00:00–04:00 打卡/照片还算值日当天）
 npm run table:check     # 校验 .env 配置的表格字段是否符合约定
 npm run table:create    # 自动新建 Bitable+排班表（打印 app_token/table_id 供 .env 回填）
 ```
