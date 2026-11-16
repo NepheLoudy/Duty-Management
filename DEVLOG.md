@@ -766,3 +766,13 @@
 - README express 桩断言数 29→38（`node scripts/stub-test-express.js` 实跑为准；at 标签净化/备注确认人等后加断言未同步）；roster-fill 16 断言实跑核对无误未动；
 - `.env.example` 补 `ZKLINK_STATE_FILE` 注释键（README:188 与 src/zklink/config.js:93 均实读，唯独模板缺）；
 - 头部指针补正：v70/v71 push 时漏更「当前最新」行（指针停 v69），本批随 v72 一并补齐链。
+## v97 · 2026-11-16 · 随本提交落地 · feat
+
+**请假代班指定闭环（曼波令：私信请假确认时指定代班人，回执后自动改班）**
+
+- **交互流**：我要请假 → 确认请假 [姓名]（前缀词形，switch 精确匹配吃不下带参）→ 私信代班人（10 分钟回执窗）→ 确认代班=一次性完成换人写表+补偿登记+双方回执+动态广场记「值日代班」；拒绝代班/超时=通知请假人可再指定一轮（subRound 限两轮，用尽提示转补偿）。
+- **数据模型（曼波两口径 2026-11-16 定）**：代班成功=班记录人员+姓名字段改为代班人（status 不动=正常值日，看板/询问/临门/收口单一事实源自动认人）；请假人补偿照记（班被代=当日空缺被解决，但请假义务不豁免）。冲突检查=代班人当天还有班时回执提示风险但放行。
+- **实现**：新增 src/services/substituteService.js（requestSubstitute/confirmSubstitute/rejectSubstitute/sweepSubstituteTimeouts/cancelByLeaveOpenId）；dutyTableService.updateAssignee（换人写表）；stateStore 增 pendingSubstitutes（代班人侧会话）+pendingLeaves.substitute/subRound（请假人侧）；cron 每分钟 duty_substitute_sweep（无请求轻扫+超时通知，过静默闸门）；写表互斥挂 withScheduleLock（与排班生成/补偿安置同链）。
+- **指令契约**：p2pCommandPrefixes 增「确认请假 」前缀（带参整句 hub 放行）；p2pCommands 增确认代班/拒绝代班（裸词+斜杠）；HELP_TEXT 更新。stub-test-policy 37→41 项、cron-status 16→17 任务守卫同步。
+- **测试**：stub-test-substitute.js 23 断言（双会话/私信/换人字段/补偿照记/轮次流转/超时清扫 TTL 刷新/取消联动）。调试坑：桩 mock 用默认字段名「日期/岗位」而真表 env 映射为「值日时间/负责区域」——dotenv 在测试进程同样生效，mock 数据必须按 env 真名构造。24 套 565 断言全绿。
+- **生产验证**：/api/bot/cron-status registeredTasks 含 duty_substitute_sweep（taskCount=17）。
