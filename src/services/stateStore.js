@@ -23,7 +23,8 @@ function emptyState() {
     boards: {},         // chatId -> lastBoardAt(ms)
     obligations: [],    // { id, name, weekStart, reason, placed, placedAt, recordId, createdAt }
     absenceStreaks: {}, // name -> { count, lastDate }
-    pendingLeaves: {},  // openId -> { recordId, dateStr, position, name, askedAt }（请假二次确认，2026-09-24）
+    pendingLeaves: {},  // openId -> { recordId, dateStr, position, name, askedAt, substitute?: {name, openId, round, askedAt} }（请假二次确认，2026-09-24；代班指定 2026-11-16）
+    pendingSubstitutes: {}, // 代班人 openId -> { recordId, dateStr, position, leaveName, leaveOpenId, askedAt }（代班回执确认会话，2026-11-16）
     aheadReminded: {},  // "发送日|daysAhead" -> { openId: true }（提前预告当日去重，v48f；
                         // 只记发送成功者，失败者留给后续槽位补发；写入时清非今日键防膨胀）
   };

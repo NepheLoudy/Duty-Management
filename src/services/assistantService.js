@@ -7,6 +7,7 @@ const state = require('./stateStore');
 const dutyTable = require('./dutyTableService');
 const scheduleService = require('./scheduleService');
 const inquiry = require('./inquiryService');
+const substitute = require('./substituteService');
 const policy = require('./policyService');
 const express = require('./expressService');
 const compensation = require('./compensationService');
@@ -27,7 +28,7 @@ const compensation = require('./compensationService');
 const HELP_TEXT = [
   '🧹 值日助手用法（指令带不带 / 都可以）：',
   '· 「查询我的下一次值日」—— 下次值日日期与岗位',
-  '· 「我要请假」—— 请假分两步：先发「我要请假」，机器人点名班次日期，回复「确认请假」才生效（10 分钟内有效，误触回「取消请假」）；生效后当次置已请假（当日该岗空缺，由同日队员兼顾），下周自动补插一次值日',
+  '· 「我要请假」—— 请假分两步：先发「我要请假」，机器人点名班次日期，回复「确认请假 [代班人姓名]」生效（10 分钟内有效，误触回「取消请假」）。带姓名=代班指定：对方私信确认后该班转为其正常值日（最多指定两轮）；不带姓名=当次置已请假（当日该岗空缺，由同日队员兼顾），下周自动补插一次值日。被指定代班的人回复「确认代班」/「拒绝代班」即可',
   '· 「绑定 姓名」—— 首次使用绑定账号（提醒与确认走私信）',
   '· 「打卡」—— 值日日中午提醒起即可回复完成打卡（口语「是的」「完成了」也可；照片可直接发我，次日凌晨 4:00 验收收口）；「否」= 今天不做了',
   '· 「生成排班表」—— 管理员专用，按日历向下生成一个月排班',
@@ -223,6 +224,16 @@ async function handleCommand(payload = {}) {
 
   const member = roster.findByOpenId(openId);
 
+  // 「确认请假 [代班人姓名]」（2026-11-16 v97）：带姓名=代班指定流（switch 精确匹配吃不下
+  // 带参词形，仿「绑定 X」前缀处理）；不带姓名的裸「确认请假」仍走下方 switch case
+  if (raw.startsWith('确认请假') && raw !== '确认请假') {
+    if (!member) {
+      return { handled: true, reply: '未识别到你的账号。请先发「绑定 姓名」完成绑定，再请假。' };
+    }
+    const subName = raw.slice('确认请假'.length).trim() || String(args[0] || '').trim();
+    return inquiry.confirmLeave(openId, subName);
+  }
+
   switch (raw) {
     case '值日助手':
       return { handled: true, reply: HELP_TEXT };
@@ -263,12 +274,21 @@ async function handleCommand(payload = {}) {
       return inquiry.requestLeave(member);
     }
 
-    // 请假二次确认（2026-09-24）：「我要请假」只登记意向，「确认请假」才生效
+    // 请假二次确认（2026-09-24）：「我要请假」只登记意向，裸「确认请假」=空缺走补偿
+    //（带姓名的代班指定流在上方 startsWith 分支）
     case '确认请假': {
       if (!member) {
         return { handled: true, reply: '未识别到你的账号。请先发「绑定 姓名」完成绑定，再请假。' };
       }
       return inquiry.confirmLeave(openId);
+    }
+
+    // 代班回执（2026-11-16 v97）：仅被指定代班的人有效（按 openId 匹配代班确认会话）
+    case '确认代班':
+    case '拒绝代班': {
+      return raw === '确认代班'
+        ? substitute.confirmSubstitute(openId)
+        : substitute.rejectSubstitute(openId);
     }
 
     case '取消请假': {

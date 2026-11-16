@@ -7,6 +7,7 @@ const roster = require('./rosterService');
 const state = require('./stateStore');
 const compensation = require('./compensationService');
 const scheduleService = require('./scheduleService');
+const substitute = require('./substituteService');
 const ddlConflict = require('./ddlConflictClient');
 const plaza = require('./plaza');
 
@@ -612,11 +613,17 @@ async function requestLeave(member) {
   };
 }
 
-/** 「确认请假」第二步：按确认会话里的记录执行请假（原请假链路） */
-function confirmLeave(openId) {
+/** 「确认请假」第二步：按确认会话里的记录执行请假（原请假链路）。
+ *  带代班人姓名（2026-11-16 v97）：转发 substituteService——私信代班人等回执，「确认代班」后
+ *  一次性完成换人写表+请假人补偿登记；拒/超时可再指定一轮（substituteService 详注）。 */
+function confirmLeave(openId, substituteName = '') {
   const pending = pendingLeaveOf(openId);
   if (!pending) {
     return { handled: true, reply: '没有待确认的请假。要请假请先发「我要请假」，再回复「确认请假」生效。' };
+  }
+  const subName = String(substituteName || '').trim();
+  if (subName) {
+    return substitute.requestSubstitute(openId, subName);
   }
   return withLeaveLock(async () => {
     const all = await dutyTable.getAllDayRecords();
@@ -633,15 +640,16 @@ function confirmLeave(openId) {
     }
     state.mutate((s) => { if (s.pendingLeaves) delete s.pendingLeaves[openId]; });
     // 第二参是 knownRecordId（v36 语义：按 recordId 精确请假）——recordId 混进 member
-    // 对象会让精确请求退化为按姓名取最早班次（确认会话点名的班次可能因此请错）
+    // 对象会让精确请求退化为按姓名匹配取最早班次（确认会话点名的班次可能因此请错）
     return requestLeaveLocked({ name: pending.name, openId }, rec.recordId);
   });
 }
 
-/** 「取消请假」：丢弃确认会话，班次不受影响 */
+/** 「取消请假」：丢弃确认会话，班次不受影响；联动撤销代班请求（代班人不再等回执） */
 function cancelLeave(openId) {
   const had = Boolean(pendingLeaveOf(openId));
   state.mutate((s) => { if (s.pendingLeaves) delete s.pendingLeaves[openId]; });
+  substitute.cancelByLeaveOpenId(openId);
   return {
     handled: true,
     reply: had

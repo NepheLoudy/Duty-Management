@@ -94,7 +94,7 @@ ok(st.registeredTasks.includes('duty_ahead_remind_d7') && st.registeredTasks.inc
   '提前预告按配置域展开（duty_ahead_remind_d7/_d3）');
 ok(st.registeredTasks.includes('duty_zklink_broadcast') && st.registeredTasks.includes('duty_zklink_watchdog'),
   'zklink 可选任务在册（zklink 开时）');
-ok(st.taskCount === 16, `默认配置+zklink 任务总数 16（实际 ${st.taskCount}：7 固定+提前预告 2 域×3 槽+收口 1+zklink 2）`);
+ok(st.taskCount === 17, `默认配置+zklink 任务总数 17（实际 ${st.taskCount}：7 固定+提前预告 2 域×3 槽+收口 1+代班清扫 1+zklink 2，v97 加代班超时清扫）`);
 
 // ---- ② zklink 关：核心任务一个不少，running 不受影响 ----
 stopCronJobs();
@@ -104,7 +104,7 @@ startCronJobs();
 st = getCronStatus();
 ok(st.running === true, 'zklink 关（核心任务仍齐备）→ running=true（可选任务不参与判定）');
 ok(!st.registeredTasks.includes('duty_zklink_broadcast'), 'zklink 任务不在册（zklink 关时）');
-ok(st.taskCount === 14, `默认配置（zklink 关）任务总数 14（实际 ${st.taskCount}）`);
+ok(st.taskCount === 15, `默认配置（zklink 关）任务总数 15（实际 ${st.taskCount}，v97 含代班清扫）`);
 
 // ---- ③ 残废态：任务被裁剪 → running=false ----
 // 真实注册是全量的，用假调度侧停掉核心任务模拟注册失败/运行中被裁剪的残废态：

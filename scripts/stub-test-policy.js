@@ -73,8 +73,8 @@ function check(desc, cond, detail = '') {
     p.hubEnforcement.groupBoardCommand === '值日助手'
     && p.hubEnforcement.closeBasicCommands === true
     && typeof p.hubEnforcement.fallbackGuidance === 'string' && p.hubEnforcement.fallbackGuidance.includes('值日助手'));
-  check('策略：p2p 指令清单 10 核心词（含打卡/打卡了/请假确认两步）+8 打卡口语变体 +10 斜杠别名 +快递助手 6 词 +取件词形 + 绑定前缀',
-    p.p2pCommands.length === 37
+  check('策略：p2p 指令清单（v97 含代班两词与请假带参前缀）',
+    p.p2pCommands.length === 41
     && ['快递助手', '快递', '查询当前快递', '已取', '全部已取', '确认全部已取', '/快递助手', '/快递', '/查询当前快递'].every((w) => p.p2pCommands.includes(w))
     && Array.isArray(p.p2pCommandPatterns) && p.p2pCommandPatterns.includes('^已取\\s*\\d*$')
     && p.p2pCommandPatterns.includes('^全部已取$') && p.p2pCommandPatterns.includes('^确认全部已取$')
@@ -84,7 +84,8 @@ function check(desc, cond, detail = '') {
     && ['是的', '好', '好了', '完成', '完成了', '做完了', '搞定', '搞定了'].every((w) => p.p2pCommands.includes(w))
     // 请假二次确认词形随 2026-09-24 新增（裸词 + 斜杠别名都要放行）
     && ['确认请假', '取消请假', '/确认请假', '/取消请假'].every((w) => p.p2pCommands.includes(w))
-    && JSON.stringify(p.p2pCommandPrefixes) === JSON.stringify(['绑定', '/绑定']),
+    && p.p2pCommands.includes('确认代班') && p.p2pCommands.includes('拒绝代班')
+    && JSON.stringify(p.p2pCommandPrefixes) === JSON.stringify(['绑定', '/绑定', '确认请假 ', '/确认请假 ']),
     JSON.stringify(p.p2pCommands));
 
   // ③ 管辖判定

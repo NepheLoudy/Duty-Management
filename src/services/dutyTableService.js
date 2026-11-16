@@ -99,6 +99,16 @@ async function setStatus(recordId, statusValue) {
   return bitable.updateRecord(recordId, fields);
 }
 
+/** 换人（2026-11-16 代班指定）：改人员+姓名字段，状态/日期/岗位不动——
+ *  排班单一事实源生效后，看板/询问/临门/收口自动认新人员。openId 缺失时只改姓名（私信链路会降级） */
+async function updateAssignee(recordId, member) {
+  const fields = { [config.fields.name]: member.name };
+  if (member.openId) {
+    fields[config.fields.user] = [{ id: member.openId }];
+  }
+  return bitable.updateRecord(recordId, fields);
+}
+
 /** 当日总状态写回（今日完成值日 / 清除传 null）；三条记录同步写同一值 */
 async function setDayStatus(recordIds, value) {
   const fields = { [config.fields.dayStatus]: value || null };
@@ -171,6 +181,7 @@ module.exports = {
   batchDeleteRecords,
   createDayRecords,
   setStatus,
+  updateAssignee,
   setDayStatus,
   appendReceipt,
   computeDayStatus,

@@ -4,6 +4,7 @@ const quietHours = require('../utils/quietHours');
 const { shanghaiParts, addDays } = require('../utils/dates');
 const inquiry = require('../services/inquiryService');
 const compensation = require('../services/compensationService');
+const substitute = require('../services/substituteService');
 const assistant = require('../services/assistantService');
 const express = require('../services/expressService');
 const roster = require('../services/rosterService');
@@ -53,6 +54,7 @@ const CRON_TASK_LABELS = {
   duty_noon_remind: '当日中午提醒',
   duty_lastcall: '收口前临门提醒',
   duty_reconcile: '值日对账',
+  duty_substitute_sweep: '代班超时清扫',
   duty_board_broadcast: '看板自动播报',
   duty_express_broadcast: '快递未取播报',
 };
@@ -81,6 +83,9 @@ function startCronJobs() {
     duty_ask: () => inquiry.askToday(),
     duty_lastcall: () => inquiry.sendLastCall(),
     duty_reconcile: () => compensation.reconcile(),
+    // 代班超时清扫（2026-11-16 v97）：每分钟扫 pendingSubstitutes 过期项——
+    // 无网络请求（读 state+过期判断），有超时项才发私信；通知过静默闸门
+    duty_substitute_sweep: () => substitute.sweepSubstituteTimeouts(),
     duty_board_broadcast: () => assistant.broadcastTodayBoard(),
     duty_express_broadcast: () => express.broadcastPending(),
   };
@@ -103,6 +108,8 @@ function startCronJobs() {
   tasks.push(scheduleTask(config.schedule.noonRemind, 'duty_noon_remind', '当日中午提醒', quietTaskRunners.duty_noon_remind));
   tasks.push(scheduleTask(config.schedule.lastCall, 'duty_lastcall', '收口前临门提醒', quietTaskRunners.duty_lastcall));
   tasks.push(scheduleTask(config.schedule.reconcile, 'duty_reconcile', '值日对账', quietTaskRunners.duty_reconcile));
+  // 代班超时清扫（v97）：每分钟（0 * * * * *），10 分钟 TTL 的代班请求超时后及时通知请假人
+  tasks.push(scheduleTask('0 * * * * *', 'duty_substitute_sweep', '代班超时清扫', quietTaskRunners.duty_substitute_sweep));
   tasks.push(scheduleTask(config.schedule.boardBroadcast, 'duty_board_broadcast', '看板自动播报', quietTaskRunners.duty_board_broadcast));
   // 快递未取播报（每小时整点 EXPRESS_BROADCAST_SCHEDULE；无未取跳过不发；过静默闸门，
   // 冲刷补发时以补发时刻最新数据重查——夜间已被取完的不再播；静默窗口内同名积压
