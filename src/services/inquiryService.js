@@ -607,42 +607,30 @@ async function requestLeave(member) {
     handled: true,
     reply: [
       `🗓 请假确认：你将于 ${rec.dateStr}（${rec.position}）值日。`,
-      '确认请假请回复「确认请假」（10 分钟内有效）；误触请回复「取消请假」。',
-      '确认后：当次置已请假，当日该岗由同日队员兼顾，下周自动补插一次值日。',
+      '请假需指定代班人：回复「确认请假 姓名」（如：确认请假 王五），对方私信确认后请假才生效（10 分钟内有效）；误触请回复「取消请假」。',
+      '生效后：该班转为代班人正常值日，你的下周补偿照常登记（连续请假会加罚）。',
     ].join('\n'),
   };
 }
 
-/** 「确认请假」第二步：按确认会话里的记录执行请假（原请假链路）。
- *  带代班人姓名（2026-11-16 v97）：转发 substituteService——私信代班人等回执，「确认代班」后
- *  一次性完成换人写表+请假人补偿登记；拒/超时可再指定一轮（substituteService 详注）。 */
+/** 「确认请假 [姓名]」第二步（2026-11-17 v98 口径，曼波定）：
+ *  代班强制——不带姓名不生效（提示补姓名）；私信代班人拿回执，「确认代班」后请假才成立
+ *  （换人写表+请假人照记补偿义务含加罚）；拒/超时可再指定一轮，两轮失败=请假不成立
+ *  （班保持原状、零义务）。裸「确认请假」只做引导，不再有「空缺走补偿」旁路。 */
 function confirmLeave(openId, substituteName = '') {
   const pending = pendingLeaveOf(openId);
   if (!pending) {
-    return { handled: true, reply: '没有待确认的请假。要请假请先发「我要请假」，再回复「确认请假」生效。' };
+    return { handled: true, reply: '没有待确认的请假。要请假请先发「我要请假」，再回复「确认请假 代班人姓名」发起。' };
   }
   const subName = String(substituteName || '').trim();
-  if (subName) {
-    return substitute.requestSubstitute(openId, subName);
+  if (!subName) {
+    // 代班强制：裸确认不生效，引导补姓名（旧「空缺走补偿」旁路废止）
+    return {
+      handled: true,
+      reply: '请假需要指定代班人哦。回复「确认请假 姓名」（如：确认请假 王五）发起代班确认；对方私信确认后请假才生效。',
+    };
   }
-  return withLeaveLock(async () => {
-    const all = await dutyTable.getAllDayRecords();
-    const rec = all.find((r) => r.recordId === pending.recordId);
-    if (!rec || rec.status) {
-      state.mutate((s) => { if (s.pendingLeaves) delete s.pendingLeaves[openId]; });
-      const next = all.find((r) => r.name === pending.name && r.dateStr >= todayStr() && !r.status);
-      return {
-        handled: true,
-        reply: next
-          ? `该班次（${pending.dateStr}）已有状态或已变更，未执行请假。你近期还有 ${next.dateStr}（${next.position}）待完成，如需请假请重新发「我要请假」。`
-          : '该班次已有状态或已变更，未执行请假。近期没有其他待完成的值日安排。',
-      };
-    }
-    state.mutate((s) => { if (s.pendingLeaves) delete s.pendingLeaves[openId]; });
-    // 第二参是 knownRecordId（v36 语义：按 recordId 精确请假）——recordId 混进 member
-    // 对象会让精确请求退化为按姓名匹配取最早班次（确认会话点名的班次可能因此请错）
-    return requestLeaveLocked({ name: pending.name, openId }, rec.recordId);
-  });
+  return substitute.requestSubstitute(openId, subName);
 }
 
 /** 「取消请假」：丢弃确认会话，班次不受影响；联动撤销代班请求（代班人不再等回执） */

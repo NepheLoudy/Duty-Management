@@ -80,6 +80,13 @@ function seedLeave(openId) {
   check('代班人收到私信', privateMsgs.some((m) => m.includes('指定你代班') && m.includes('确认代班')), JSON.stringify(privateMsgs));
   privateMsgs = [];
 
+  console.log('== 1b. 裸确认请假 → 引导补姓名（代班强制口径） ==');
+  const inquiry = require('../src/services/inquiryService');
+  seedLeave('ou_li');
+  const bare = inquiry.confirmLeave('ou_li');
+  check('裸确认不生效，引导补姓名', bare.reply.includes('指定代班人') && !bare.reply.includes('已登记'), bare.reply.slice(0, 60));
+  check('裸确认后会话保留（未消费）', !!state.load().pendingLeaves['ou_li']);
+
   console.log('== 2. requestSubstitute 拒绝面 ==');
   const bad = await substitute.requestSubstitute('ou_li', '查无此人');
   check('名册未命中 → 提示重试', bad.reply.includes('查不到'));
@@ -88,7 +95,7 @@ function seedLeave(openId) {
   seedLeave('ou_zhao');
   state.mutate((s) => { s.pendingLeaves['ou_zhao'].subRound = 2; });
   const capped = await substitute.requestSubstitute('ou_zhao', '王五');
-  check('超两轮 → 提示转补偿', capped.reply.includes('最多两轮'), capped.reply);
+  check('超两轮 → 提示请假不成立', capped.reply.includes('最多两轮') && capped.reply.includes('不成立'), capped.reply);
 
   console.log('== 3. confirmSubstitute：换人写表 + 补偿 + 回执 ==');
   const r3 = await substitute.confirmSubstitute('ou_wang');
@@ -120,7 +127,7 @@ function seedLeave(openId) {
   const s5 = state.load();
   check('subRound=2', s5.pendingLeaves['ou_li'].subRound === 2);
   await new Promise((r) => setTimeout(r, 30));
-  check('用尽提示', privateMsgs.some((m) => m.includes('已用完')), JSON.stringify(privateMsgs));
+  check('用尽提示=请假不成立', privateMsgs.some((m) => m.includes('已用完') && m.includes('不成立')), JSON.stringify(privateMsgs));
   privateMsgs = [];
 
   console.log('== 6. cancelLeave 联动清理 ==');

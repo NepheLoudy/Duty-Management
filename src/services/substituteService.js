@@ -45,18 +45,18 @@ function requestSubstitute(leaveOpenId, subName) {
   if ((pending.subRound || 0) >= MAX_ROUNDS) {
     return {
       handled: true,
-      reply: '本轮请假已用完代班指定次数（最多两轮）。回复「确认请假」走补偿安排，或「取消请假」放弃。',
+      reply: '本轮请假已用完代班指定次数（最多两轮），本次请假不成立：班次保持原状。回复「取消请假」关闭，或联系管理员调整排班。',
     };
   }
   const sub = roster.findByName(subName);
   if (!sub) {
     return {
       handled: true,
-      reply: `名册里查不到「${subName}」。请重新回复「确认请假 姓名」指定代班人，或直接回复「确认请假」走补偿安排。`,
+      reply: `名册里查不到「${subName}」。请重新回复「确认请假 姓名」指定代班人。`,
     };
   }
   if (sub.openId === leaveOpenId) {
-    return { handled: true, reply: '不能指定你自己代班哦。回复「确认请假 姓名」指定其他人，或直接回复「确认请假」走补偿。' };
+    return { handled: true, reply: '不能指定你自己代班哦。回复「确认请假 姓名」指定其他人。' };
   }
   state.mutate((s) => {
     const p = s.pendingLeaves?.[leaveOpenId];
@@ -80,7 +80,7 @@ function requestSubstitute(leaveOpenId, subName) {
   bot.sendTextToUser(sub.openId, subReply).catch((err) => console.error('[代班] 代班人私信失败:', err.message));
   return {
     handled: true,
-    reply: `已向 ${sub.name} 发出代班确认私信（10 分钟内有效）。对方确认后完成改班：该班转为 ${sub.name} 正常值日；你的下周补偿按口径照常登记。若对方婉拒或超时，你会收到通知（届时可再指定一人或转补偿）。`,
+    reply: `已向 ${sub.name} 发出代班确认私信（10 分钟内有效）。对方确认后请假才成立：该班转为 ${sub.name} 正常值日，你的下周补偿照记。若对方婉拒或超时，你会收到通知（可再指定一人；两轮都未成则本次请假不成立、班次保持原状）。`,
   };
 }
 
@@ -129,7 +129,7 @@ function confirmSubstitute(subOpenId) {
       conflictNote,
       penalty ? '\nℹ️ 请假人已连续两次缺勤/请假，其补偿安排会含加罚批次。' : '',
     ].filter(Boolean).join('\n');
-    const toLeave = `✅ ${subMember.name} 已确认代班：${subPending.dateStr}（${subPending.position}）的班转为其正常值日，你的下周补偿已按口径登记。`;
+    const toLeave = `✅ 请假成立：${subMember.name} 已确认代班 ${subPending.dateStr}（${subPending.position}），该班转为其正常值日；你的下周补偿已登记${penalty ? '（含连续请假加罚，本次额外多插一次）' : ''}。`;
     bot.sendTextToUser(still.leaveOpenId, toLeave).catch((err) => console.error('[代班] 请假人回执失败:', err.message));
     return { handled: true, reply: toSub };
   });
@@ -154,8 +154,8 @@ function rejectSubstitute(subOpenId) {
   });
   const roundsLeft = MAX_ROUNDS - ((state.load().pendingLeaves?.[subPending.leaveOpenId] || {}).subRound || 0);
   const leaveHint = roundsLeft > 0
-    ? `可回复「确认请假 姓名」再指定一人（还可指定 ${roundsLeft} 轮），或回复「确认请假」直接走补偿安排。`
-    : '代班指定次数已用完，回复「确认请假」直接走补偿安排。';
+    ? `可回复「确认请假 姓名」再指定一人（还可指定 ${roundsLeft} 轮）。`
+    : '代班指定次数已用完，本次请假不成立：班次保持原状（仍由你值日），未产生补偿。如确需请假可联系管理员调整排班。';
   bot.sendTextToUser(subPending.leaveOpenId, `你的代班请求被 ${subName} 婉拒（${subPending.dateStr} ${subPending.position}）。${leaveHint}`).catch((err) => console.error('[代班] 拒绝通知失败:', err.message));
   return { handled: true, reply: '已退回代班请求。' };
 }
@@ -182,8 +182,8 @@ async function sweepSubstituteTimeouts() {
     const lp2 = state.load().pendingLeaves?.[p.leaveOpenId];
     const roundsLeft = MAX_ROUNDS - ((lp2 || {}).subRound || 0);
     const leaveHint = roundsLeft > 0
-      ? `可回复「确认请假 姓名」再指定一人（还可指定 ${roundsLeft} 轮），或回复「确认请假」直接走补偿安排。`
-      : '代班指定次数已用完，回复「确认请假」直接走补偿安排。';
+      ? `可回复「确认请假 姓名」再指定一人（还可指定 ${roundsLeft} 轮）。`
+      : '代班指定次数已用完，本次请假不成立：班次保持原状（仍由你值日），未产生补偿。如确需请假可联系管理员调整排班。';
     try {
       await bot.sendTextToUser(p.leaveOpenId, `你的代班请求（${p.dateStr} ${p.position}）超时未获 ${subName} 回执。${leaveHint}`);
     } catch (err) {

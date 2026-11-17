@@ -279,29 +279,38 @@ function check(desc, cond, detail = '') {
   const beforeLeaveIds = dTargetRec
     ? beforeLeave.filter((r) => r.dateStr === dTargetRec.dateStr).map((r) => r.recordId).sort()
     : [];
-  const leave = await inquiry.confirmLeave('ou_test_d');
-  check('队员D 请假第二步：已登记请假', leave.handled && leave.reply.includes('已登记请假'), leave.reply);
-  const pendingOb = state.load().obligations.filter((o) => !o.placed);
-  check('请假生成 1 条下周插入义务', pendingOb.length === 1 && pendingOb[0].name === '队员D', JSON.stringify(pendingOb));
-  // 补位已废除（2026-09-25 口径）：请假当日该岗空缺，不再抽人顶班——
-  // 该日记录数保持 3（1 条已请假 + 2 条正常），无第 4 条补位记录、无补位私信
+  // v98 代班强制口径：裸确认不再直接请假，改走「确认请假 姓名」+ 代班人确认回执才成立。
+  // 这里改用完整代班流：指定队员C 代班 → 模拟 C 确认 → 断言换人写表+补偿登记。
+  const bare = await inquiry.confirmLeave('ou_test_d');
+  check('队员D 裸确认：引导指定代班人（代班强制）', bare.handled && bare.reply.includes('指定代班人'), bare.reply);
+  const leave = await inquiry.confirmLeave('ou_test_d', '队员C');
+  check('队员D 请假第二步：已通知代班人', leave.handled && leave.reply.includes('已向'), leave.reply);
+  const subPendingAll = state.load().pendingSubstitutes;
+  const subOpenIdC = Object.keys(subPendingAll || {}).find((k) => subPendingAll[k].leaveName === '队员D');
+  check('队员C 收到代班确认会话', !!subOpenIdC, JSON.stringify(Object.keys(subPendingAll || {})));
+  const subResult = await require('../src/services/substituteService').confirmSubstitute(subOpenIdC);
+  check('队员C 确认代班：请假成立', subResult.reply.includes('已确认代班'), subResult.reply.slice(0, 60));
+  const pendingOb = state.load().obligations.filter((o) => !o.placed && o.name === '队员D');
+  check('请假生成下周插入义务（代班确认后照记）', pendingOb.length === 1 && pendingOb[0].name === '队员D', JSON.stringify(pendingOb));
+  // 补位已废除（2026-09-25 口径）+ v98 代班指定：私信请假成立后班记录**换人**（代班人正常值日），
+  // 不再有「已请假」记录——这里断言换人事实：原班记录人员=队员C、记录数不变、无补位私信
   let dCanPlace = null; // 对账前快照：D 的义务能否就地安置（供步骤 7 断言用）
   let dLeaveWeekStart = null; // D 义务目标周起点（供步骤 7 顺延断言比对）
   {
     const algo = require('../src/services/scheduleAlgo');
     const all = await dutyTable.getAllDayRecords();
-    const dLeave = all.find((r) => r.name === '队员D' && r.status === '已请假');
-    const sameDay = all.filter((r) => r.dateStr === dLeave.dateStr);
-    check('请假当日空缺：请假动作未新增记录（对比请假前快照，生成期合法插入不算补位）',
-      Boolean(dTargetRec) && dLeave.dateStr === dTargetRec.dateStr && sameDay.length === beforeLeaveIds.length,
-      JSON.stringify({ day: dLeave.dateStr, before: beforeLeaveIds.length, after: sameDay.length }));
-    check('请假回执说明当日空缺', leave.reply.includes('空缺'), leave.reply);
+    const dSubstituted = all.find((r) => r.name === '队员C' && dTargetRec && r.recordId === dTargetRec.recordId);
+    const sameDay = all.filter((r) => r.dateStr === (dTargetRec ? dTargetRec.dateStr : ''));
+    check('v98 代班生效：原班记录人员改为代班人（记录数不变）',
+      Boolean(dSubstituted) && sameDay.length === beforeLeaveIds.length,
+      JSON.stringify({ day: dTargetRec && dTargetRec.dateStr, before: beforeLeaveIds.length, after: sameDay.length }));
+    check('请假回执说明代班生效', leave.reply.includes('已确认代班') || subResult.reply.includes('已确认代班'), leave.reply);
     check('请假不发送补位私信', !memory.dmCalls.some((c) => c.text.includes('补位通知')),
       JSON.stringify(memory.dmCalls.map((c) => c.text.slice(0, 20))));
 
     // 目标周能否安置 D 的义务——快照必须取**对账前**：安置本身会占掉空位日，
     // 对账后再算会自相矛盾（该断言曾对真实日期敏感误报，2026-09-13 修正）
-    const weekStart = addDays(mondayOf(dLeave.dateStr), 7);
+    const weekStart = addDays(mondayOf(dTargetRec ? dTargetRec.dateStr : today), 7);
     dLeaveWeekStart = weekStart;
     const weekEnd = addDays(weekStart, 6);
     const assignments = new Map();
@@ -333,8 +342,10 @@ function check(desc, cond, detail = '') {
   // 断言定向到 D 本人（2026-09-19）：此前检查全局 stillQueued.length，会被同周其他
   // 队员的义务（如 C 满周顺延）误伤——日期敏感误报即此因
   const dObl = state.load().obligations.find((o) => o.name === '队员D' && o.reason === '已请假');
-  check('对账：队员D 义务按目标周空位情况正确处置',
-    dCanPlace ? Boolean(dObl && dObl.placed) : Boolean(!dObl || !dObl.placed),
+  // v98 后场景前件变化：D 的班已被代班人顶上（表里无请假空缺位），canPlace 模拟恒 false，
+  // 而对账真实安置走「顺延到有位之周」（placedDate 可远期）——断言放宽为不静默留队
+  check('对账：队员D 义务被安置或顺延（不静默留队）',
+    Boolean(dObl && (dObl.placed || (dObl.deferCount || 0) > 0)),
     `canPlace(对账前)=${dCanPlace} placed=${dObl && dObl.placed} placedDate=${dObl && dObl.placedDate}`);
   // 满周顺延（2026-09-19 新行为）：同周其它义务若无处安置，必须 placed 或顺延到目标周之后，
   // 不允许静默留队等过期
