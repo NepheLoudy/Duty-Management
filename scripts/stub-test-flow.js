@@ -222,22 +222,22 @@ function check(desc, cond, detail = '') {
   check('临门提醒：队员B 已传照片 → 提示只需打卡', memory.dmCalls.some((c) => c.openId === 'ou_test_b' && c.text.includes('照片已收到')));
   check('临门提醒：未传照片者引导照片+打卡', memory.dmCalls.some((c) => c.openId === 'ou_test_c' && c.text.includes('上传现场照片')));
 
-  // ---- 4. 收口 ----
+  // ---- 4. 收口（v99 照片强制：打卡无照片的队员A 也判未做完） ----
   const close = await inquiry.closeToday({ dryRun: true });
-  check('收口 dryRun：队员B/C 判未做完', close.results.filter((r) => r.status === '未做完').length === 2);
+  check('收口 dryRun：队员A/B/C 全判未做完（A 打卡无照片=不通过）', close.results.filter((r) => r.status === '未做完').length === 3);
   const closed = await inquiry.closeToday();
   check('收口：当日总状态为空（缺凭证/未全做完）', closed.dayStatus === null, String(closed.dayStatus));
   check('收口：notifications 不再含 photoOnly（死数据已删，2026-11-05）', closed.notifications.photoOnly === undefined);
-  check('收口：missNotices 覆盖全部未做完（B 有照片/C 无照片）', closed.notifications.missNotices.length === 2 && closed.notifications.missNotices.some((m) => m.name === '队员B' && m.photos) && closed.notifications.missNotices.some((m) => m.name === '队员C' && !m.photos), JSON.stringify(closed.notifications.missNotices));
+  check('收口：missNotices 覆盖全部未做完（A/B/C；B=打卡无照片新分支）', closed.notifications.missNotices.length === 3 && closed.notifications.missNotices.some((m) => m.name === '队员B' && m.photos) && closed.notifications.missNotices.some((m) => m.name === '队员A' && !m.photos) && closed.notifications.missNotices.some((m) => m.name === '队员C' && !m.photos), JSON.stringify(closed.notifications.missNotices));
   await inquiry.sendCloseNotifications(closed.notifications);
   const closeDm = memory.dmCalls.filter((c) => c.text.includes('已按「未做完」收口'));
-  check('收口：未做完者本人收到私信回执（含补偿与值日助手引导）', closeDm.length === 2 && closeDm.every((c) => c.text.includes('补偿值日') || c.text.includes('回复「打卡」')) && closeDm.some((c) => c.text.includes('值日助手')), JSON.stringify(closeDm.map((c) => c.text.slice(0, 40))));
+  check('收口：未做完者本人收到私信回执（B 走缺照片专属文案）', closeDm.length === 3 && closeDm.some((c) => c.text.includes('没有上传现场照片') && c.text.includes('不拍照不算通过')) && closeDm.filter((c) => !c.text.includes('没有上传现场照片')).every((c) => c.text.includes('缺一不可')), JSON.stringify(closeDm.map((c) => c.text.slice(0, 40))));
   check('收口：会话已清空', Object.keys(state.load().sessions).length === 0);
   const obligations = state.load().obligations;
-  check('收口：未做完成员补偿义务 2 条（队员B/队员C）', obligations.length === 2 && obligations.every((o) => ['队员B', '队员C'].includes(o.name)), JSON.stringify(obligations.map((o) => o.name)));
+  check('收口：未做完成员补偿义务 3 条（队员A/B/C）', obligations.length === 3 && obligations.every((o) => ['队员A', '队员B', '队员C'].includes(o.name)), JSON.stringify(obligations.map((o) => o.name)));
   // 收口幂等（2026-09-13）：同日第二次真实收口不得重复登记补偿/虚增强罚
   await inquiry.closeToday();
-  check('收口幂等：同日第二次收口补偿义务不重复', state.load().obligations.length === 2, JSON.stringify(state.load().obligations.map((o) => o.name)));
+  check('收口幂等：同日第二次收口补偿义务不重复', state.load().obligations.length === 3, JSON.stringify(state.load().obligations.map((o) => o.name)));
   const secondClose = await inquiry.closeToday();
   check('收口幂等：二次收口 missNotices 为空（私信不重发）', secondClose.notifications.missNotices.length === 0, JSON.stringify(secondClose.notifications.missNotices));
   const afterClose = await dutyTable.getRecordsByDate(today);
@@ -365,6 +365,8 @@ function check(desc, cond, detail = '') {
   {
     // 加罚口径（2026-10-07 v47，曼波定）：请假与未做完共用连续计数——
     // 连续两次任一原因（含混合）触发加罚 +1 条义务，计数清零
+    // v99：A 在收口已因 MISS 计 streak=1——加罚口径测试需独立场景，先重置 A 的计数
+    state.mutate((st) => { st.absenceStreaks['队员A'] = { count: 0, lastDate: '' }; });
     const obBefore = state.load().obligations.length;
     const a1 = compensation.handleAbsence('队员A', addDays(today, -2), '未做完');
     check('加罚口径：未做完第1次不加罚', a1.created.length === 1 && !a1.penalty && a1.streak === 1, JSON.stringify(a1));

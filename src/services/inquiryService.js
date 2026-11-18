@@ -69,7 +69,7 @@ async function sendPrevDayRemind(options = {}) {
       '',
       '· 想请假：回复「我要请假」',
       '· 想查询排班：回复「值日助手」',
-      '· 明天 18:30 会私信问你完成情况，完成后回复「打卡」并上传现场照片（照片会写入值日表）',
+      '· 明天 18:30 会私信问你完成情况，完成后回复「打卡」并**必须上传现场照片**（无照片不算通过，收口按未做完处理）；📸 推荐打开相机水印模式显示拍摄日期',
     ].join('\n');
     if (dryRun) {
       sent.push({ name: member.name, position: rec.position, preview: text });
@@ -245,7 +245,7 @@ async function sendNoonRemind(options = {}) {
       ...positionDutyLines(rec.position),
       ...(insertNames.has(rec.name) ? ['ℹ️ 本次为补偿值日（此前缺勤的补充安排）。'] : []),
       '',
-      '下午完工后回复「打卡」并上传现场照片（照片会写入值日表对应岗位栏），现在起即可打卡。',
+      '下午完工后回复「打卡」并上传现场照片（照片必须，无照片不算通过），现在起即可打卡。📸 推荐打开相机水印模式。',
       '18:30 会再私信确认；值日验收到次日凌晨 4:00（今晚 24:00 后仍可打卡），逾期未打卡记「未做完」。想请假回复「我要请假」。',
     ].join('\n');
     if (dryRun) {
@@ -297,7 +297,7 @@ async function askToday(options = {}) {
       ...positionDutyLines(rec.position),
       ...(insertNames.has(rec.name) ? ['ℹ️ 本次为补偿值日（此前缺勤的补充安排）。'] : []),
       '',
-      '完成后请回复「打卡」完成值日打卡，并上传现场照片（照片会写入值日表对应岗位栏）。',
+      '完成后请回复「打卡」完成值日打卡，并**必须上传现场照片**——不拍照不算通过（收口按未做完处理）。📸 推荐打开相机水印模式（显示拍摄日期）。',
       '值日验收到次日凌晨 4:00（今晚 24:00 后仍可打卡），逾期未打卡会记为「未做完」；想请假回复「我要请假」。',
     ];
     // 有未过期的 DDL 逾期确认时加冲突提示（2026-09-13 口径：值日打卡用「打卡」，
@@ -350,7 +350,8 @@ async function sessionRecord(openId) {
   return { session, rec, member };
 }
 
-/** 队员回「是」：完成状态 → 已做完（照片仍可在收口前补传） */
+/** 队员回「是/打卡」：完成状态 → 已做完（2026-11-18 v99 照片强制：无照片暂记完成，
+ *  回执明示「不补照片收口按未做完处理」；收口前补照片即转正） */
 async function handleYes(openId) {
   const { session, rec, member } = await sessionRecord(openId);
   if (!session || !rec) {
@@ -360,7 +361,7 @@ async function handleYes(openId) {
     return { handled: true, reply: '你今天的值日已登记请假，无需再确认。' };
   }
   if (rec.status === config.status.DONE) {
-    return { handled: true, reply: '✅ 你今天的值日此前已记录完成，记得把现场照片发我（收口前均可）。' };
+    return { handled: true, reply: '✅ 你今天的值日此前已记录完成。若还没发现场照片请尽快补发——收口时无照片将按未做完处理。' };
   }
   await dutyTable.setStatus(rec.recordId, config.status.DONE);
   compensation.resetStreak(session.name);
@@ -370,7 +371,7 @@ async function handleYes(openId) {
     handled: true,
     reply: photos > 0
       ? '✅ 已记录今日值日完成（照片已收到）。辛苦了！'
-      : '✅ 已记录今日值日完成。记得把现场照片发我（会写入值日表对应岗位栏），收口前均可补传。',
+      : '✅ 已记录今日值日完成（暂未收到照片）。\n⚠️ 照片是完成验收的必要材料：收口（次日凌晨 4:00）前请把现场照片发我，否则将按「未做完」处理（含补偿安排）。\n📸 推荐打开手机相机的水印模式（显示拍摄日期），凭证更规范。',
   };
 }
 
@@ -456,7 +457,7 @@ async function sendLastCall(options = {}) {
       ...(POSITION_EXTRA_LINES[rec.position] ? [POSITION_EXTRA_LINES[rec.position]] : []),
       photos
         ? '照片已收到 ✅，回复「打卡」即完成值日。'
-        : '完成后回复「打卡」并上传现场照片（照片会写入值日表）；今晚做不完也可以凌晨补打卡。',
+        : '完成后回复「打卡」，并**必须上传现场照片**——无照片将按「未做完」处理（含补偿安排）。📸 推荐打开相机水印模式（显示拍摄日期）。',
       '确实做不完：回复「我要请假」，或验收后记「未做完」（下周自动补偿一次）。查询排班发「值日助手」。',
       ...(insertNames.has(rec.name) ? ['ℹ️ 本次为补偿值日（此前缺勤的补充安排）。'] : []),
     ];
@@ -497,12 +498,14 @@ async function closeToday(options = {}) {
   for (const rec of recs) {
     let status = rec.status;
     let marked = false;
-    if (!status) {
+    const photos = Object.values(rec.receiptCounts).some((n) => n > 0);
+    // 照片强制验收（2026-11-18 v99，曼波令）：打卡了但零照片=未做完——
+    // 补偿义务与私信告知照 MISS 口径走（photos 标记让收口私信带上「缺照片」专属文案）
+    if (!status || (status === config.status.DONE && !photos)) {
       status = config.status.MISS;
       marked = true;
       if (!dryRun) await dutyTable.setStatus(rec.recordId, status);
     }
-    const photos = Object.values(rec.receiptCounts).some((n) => n > 0);
     effective.push({ ...rec, status, photos, markedNow: marked });
     results.push({ name: rec.name || '（未绑定）', position: rec.position, status, photos, markedNow: marked });
   }
@@ -680,9 +683,11 @@ async function sendCloseNotifications(notifications) {
   // 其元素无 photos 字段会发错文案，且生产路径（closeToday）恒带 missNotices
   for (const item of notifications.missNotices || []) {
     if (!item.openId) continue;
+    // v99 照片强制：photos=true 且被收口 = 打了卡但没照片（新增分支）；
+    // photos=false 且被收口 = 纯未打卡（原有文案补照片强制提示）
     const text = item.photos
-      ? '🧹 今天的值日已按「未做完」收口：你上传了照片但没有回复「打卡」。下次记得照片 + 回复「打卡」才算完成哦。'
-      : `🧹 今天的值日已按「未做完」收口（${item.position}）。下周会自动插入一次补偿值日，届时留意私信提醒；如有特殊情况请私信「值日助手」或联系管理员。`;
+      ? '🧹 今天的值日已按「未做完」收口：你回复了打卡但没有上传现场照片——照片是完成验收的必要材料，不拍照不算通过。下周会自动插入一次补偿值日；📸 下次记得打开相机水印模式（显示拍摄日期）。'
+      : '🧹 今天的值日已按「未做完」收口（未打卡且无照片凭证）。完成验收=回复「打卡」+现场照片，两者缺一不可；下周会自动插入一次补偿值日，📸 推荐打开相机水印模式（显示拍摄日期）。';
     try {
       await bot.sendTextToUser(item.openId, text);
     } catch (err) {
