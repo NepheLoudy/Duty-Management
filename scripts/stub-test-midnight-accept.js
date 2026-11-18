@@ -90,7 +90,8 @@ function check(name, cond, extra = '') {
     s.sessions['ou_a'] = { date: '2026-10-20', recordId: 'rec_old', name: '队员A', position: '工位区', askedAt: new Date().toISOString() };
   });
   const stale = await inquiry.handleYes('ou_a');
-  check('两天前的会话 → 不认并清理', stale.handled === false && !state.load().sessions['ou_a'], JSON.stringify(stale));
+  // v100：过期会话仍清理，但回执改为明确提示（不再静默 handled:false）
+  check('两天前的会话 → 不认并清理且回执明示', stale.handled === true && stale.reply.includes('没有进行中的值日确认') && !state.load().sessions['ou_a'], JSON.stringify(stale));
 
   console.log('\n== 4. 收口归属与状态 ==');
   state.mutate((s) => {

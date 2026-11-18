@@ -245,7 +245,7 @@ async function sendNoonRemind(options = {}) {
       ...positionDutyLines(rec.position),
       ...(insertNames.has(rec.name) ? ['ℹ️ 本次为补偿值日（此前缺勤的补充安排）。'] : []),
       '',
-      '下午完工后回复「打卡」并上传现场照片（照片必须，无照片不算通过），现在起即可打卡。📸 推荐打开相机水印模式。',
+      '下午完工后回复「打卡」并上传现场照片（照片必须，无照片不算通过）——打卡每天 18:00 起开放，提前发会被拒绝。📸 推荐打开相机水印模式。',
       '18:30 会再私信确认；值日验收到次日凌晨 4:00（今晚 24:00 后仍可打卡），逾期未打卡记「未做完」。想请假回复「我要请假」。',
     ].join('\n');
     if (dryRun) {
@@ -351,17 +351,41 @@ async function sessionRecord(openId) {
 }
 
 /** 队员回「是/打卡」：完成状态 → 已做完（2026-11-18 v99 照片强制：无照片暂记完成，
- *  回执明示「不补照片收口按未做完处理」；收口前补照片即转正） */
+ *  回执明示「不补照片收口按未做完处理」；收口前补照片即转正）。
+ *  2026-11-19 v100 曼波定：打卡时间窗 18:00 起才可打——提前发「打卡」直接拒绝（不记状态），
+ *  回执告知开放时刻；值日完成验收以傍晚实际完成为准，杜绝上午随手打卡。 */
+const PUNCH_OPEN_SHANGHAI_HOUR = 18;
+
+function shanghaiHourNow() {
+  return Number(new Date(Date.now() + 8 * 3600 * 1000).toISOString().slice(11, 13));
+}
+
 async function handleYes(openId) {
   const { session, rec, member } = await sessionRecord(openId);
   if (!session || !rec) {
-    return { handled: false, reply: '今天没有进行中的值日确认。发「值日助手」可查询你的排班与用法。' };
+    // v100：无会话也给明确回执（此前 handled:false + 空 reply 被 hub 静默落回，
+    // 队员视角=机器人装死——2026-11-18 三连打卡零回执的体验事故）。
+    // 注意 sessionRecord 过期清理路径返回的 member 为 null，这里须重查名册区分话术
+    const m2 = member || roster.findByOpenId(openId);
+    return {
+      handled: true,
+      reply: m2
+        ? '⏰ 现在没有进行中的值日确认（今天你没有待打卡的值日班次，或尚未到打卡时间）。每天 18:00 起才能打卡；18:30 机器人会私信确认。发「值日助手」可查询你的排班。'
+        : '未识别到你的账号。请先发「绑定 姓名」完成绑定，再进行值日打卡。',
+    };
   }
   if (rec.status === config.status.LEAVE) {
     return { handled: true, reply: '你今天的值日已登记请假，无需再确认。' };
   }
   if (rec.status === config.status.DONE) {
     return { handled: true, reply: '✅ 你今天的值日此前已记录完成。若还没发现场照片请尽快补发——收口时无照片将按未做完处理。' };
+  }
+  // 打卡时间窗（v100）：18:00（上海）前直接拒绝，不记状态
+  if (shanghaiHourNow() < PUNCH_OPEN_SHANGHAI_HOUR) {
+    return {
+      handled: true,
+      reply: `⏰ 打卡未开放：每天 18:00 起才能打卡（值日以傍晚实际完成为准）。完成后请在 18:00 后回复「打卡」并上传现场照片——照片必须，不拍照不算通过。📸 推荐打开相机水印模式。`,
+    };
   }
   await dutyTable.setStatus(rec.recordId, config.status.DONE);
   compensation.resetStreak(session.name);

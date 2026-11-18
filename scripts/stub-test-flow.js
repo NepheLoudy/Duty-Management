@@ -211,7 +211,8 @@ function check(desc, cond, detail = '') {
 
   // 陌生人/未绑定者
   const stranger = await inquiry.handleYes('ou_unknown');
-  check('非值日队员回「是」→ 礼貌忽略', stranger.handled === false && stranger.reply.includes('值日助手'));
+  // v100：无会话打卡也回明确回执（不再静默——队员视角机器人装死事故回归）
+  check('非值日队员回「是」→ 明确回执（不再静默）', stranger.handled === true && stranger.reply.includes('没有进行中的值日确认') || stranger.reply.includes('绑定'), JSON.stringify(stranger));
 
   // ---- 3.5 23:00 临门提醒（2026-09-16；2026-10-22 验收延至次日凌晨 4:00 后改文案口径） ----
   const lastcallDry = await inquiry.sendLastCall({ dryRun: true });
