@@ -79,6 +79,11 @@ app.post('/api/chat/command', async (req, res) => {
     }
 
     const result = await assistant.handleCommand(body);
+    // 处理留痕（2026-11-19 v101）：打卡/请假等 p2p 业务指令记一行——此前成功路径零日志，
+    // 队员反馈「没回执」时无法判定请求是否到达（姜辰磊 11-18 三连打卡排查实锤）
+    if (body.chatType === 'p2p') {
+      console.log(`[指令] p2p ${String(body.command || '').slice(0, 20)} openId=${String(body.openId || '').slice(0, 16)} reply=${result.reply ? '有' : '无'}`);
+    }
     res.json({ reply: result.reply || '' });
   } catch (err) {
     console.error('处理转发指令失败:', err);
