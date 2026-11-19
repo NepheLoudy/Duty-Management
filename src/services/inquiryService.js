@@ -1,5 +1,6 @@
 const config = require('../config');
-const { addDays, todayStr, dutyDateStr } = require('../utils/dates');
+const dates = require('../utils/dates');
+const { addDays, todayStr, dutyDateStr } = dates;
 const bot = require('../feishu/bot');
 const client = require('../feishu/client');
 const dutyTable = require('./dutyTableService');
@@ -354,10 +355,21 @@ async function sessionRecord(openId) {
  *  回执明示「不补照片收口按未做完处理」；收口前补照片即转正）。
  *  2026-11-19 v100 曼波定：打卡时间窗 18:00 起才可打——提前发「打卡」直接拒绝（不记状态），
  *  回执告知开放时刻；值日完成验收以傍晚实际完成为准，杜绝上午随手打卡。 */
-const PUNCH_OPEN_SHANGHAI_HOUR = 18;
+const PUNCH_OPEN_SHANGHAI_HOUR = Number.isFinite(Number(process.env.DUTY_PUNCH_OPEN_HOUR))
+  ? Number(process.env.DUTY_PUNCH_OPEN_HOUR) : 18; // 测试可 env 覆盖（0 也合法）；生产缺省 18 点
+// 跨零点补收窗（10-22 口径）：00:00–04:00 打卡/照片仍算值日当天——时间窗判定放行
+const PUNCH_LATE_NIGHT_END_HOUR = Number(process.env.DUTY_PUNCH_LATE_NIGHT_END_HOUR) || 4;
 
 function shanghaiHourNow() {
-  return Number(new Date(Date.now() + 8 * 3600 * 1000).toISOString().slice(11, 13));
+  // 走 utils/dates 的 shanghaiParts（本仓统一上海挂钟源）——桩测试可冻结时钟，
+  // 且与 dutyDateStr 的切天口径共用同一时钟源（防双源漂移）
+  return dates.shanghaiParts().hh;
+}
+
+// 时间窗判定：正常窗（≥18 点）∪ 跨零点补收窗（<4 点）都放行
+function punchWindowOpen() {
+  const h = shanghaiHourNow();
+  return h >= PUNCH_OPEN_SHANGHAI_HOUR || h < PUNCH_LATE_NIGHT_END_HOUR;
 }
 
 async function handleYes(openId) {
@@ -380,11 +392,12 @@ async function handleYes(openId) {
   if (rec.status === config.status.DONE) {
     return { handled: true, reply: '✅ 你今天的值日此前已记录完成。若还没发现场照片请尽快补发——收口时无照片将按未做完处理。' };
   }
-  // 打卡时间窗（v100）：18:00（上海）前直接拒绝，不记状态
-  if (shanghaiHourNow() < PUNCH_OPEN_SHANGHAI_HOUR) {
+  // 打卡时间窗（v100/v102）：正常窗 18:00 起 ∪ 跨零点补收窗 00:00–04:00（10-22 口径），
+  // 白天（04:00–18:00）直接拒绝不记状态
+  if (!punchWindowOpen()) {
     return {
       handled: true,
-      reply: `⏰ 打卡未开放：每天 18:00 起才能打卡（值日以傍晚实际完成为准）。完成后请在 18:00 后回复「打卡」并上传现场照片——照片必须，不拍照不算通过。📸 推荐打开相机水印模式。`,
+      reply: `⏰ 打卡未开放：每天 18:00 起才能打卡（值日以傍晚实际完成为准；次日凌晨 4:00 前仍可补打）。完成后请在 18:00 后回复「打卡」并上传现场照片——照片必须，不拍照不算通过。📸 推荐打开相机水印模式。`,
     };
   }
   await dutyTable.setStatus(rec.recordId, config.status.DONE);
@@ -444,11 +457,13 @@ async function handleImage({ openId, imageKey, imageKeys, messageId }) {
   }
   const doneMarked = rec.status === config.status.DONE;
   console.log(`[图片] 已收录 ${keys.length} 张 → ${session.name}/${session.position}（该岗累计 ${count} 张，消息尾号 ${base}）`);
-  const plural = keys.length > 1 ? `共 ${keys.length} 张，` : '';
+  const plural = keys.length > 1 ? '共 ' + keys.length + ' 张，' : '';
   return {
     handled: true,
     reply: `📸 已收到${plural}写入「${session.position}」凭证栏（该岗累计 ${count} 张）。`
-      + (doneMarked ? '今日值日已完成，辛苦了！' : '完成后记得回复「打卡」，验收（次日凌晨 4:00）前有效。'),
+      + (doneMarked
+        ? '今日值日已完成（照片凭证齐了），辛苦了！收口（次日凌晨 4:00）前如需补拍/换照可以再发。'
+        : '记得回复「打卡」完成打卡（每天 18:00 起可打）；验收（次日凌晨 4:00）前照片随到随收，监听不中断。'),
   };
 }
 

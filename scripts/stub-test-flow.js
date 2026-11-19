@@ -25,6 +25,7 @@ fs.writeFileSync(WHITELIST_FILE, JSON.stringify({ names: ['队员E'] }));
 
 process.env.PLAZA_BITABLE_TABLE_ID = ''; // 测试禁用动态广场写表（防污染生产表）
 process.env.QUIET_HOURS_DISABLED = '1';
+process.env.DUTY_PUNCH_OPEN_HOUR = '0'; // 打卡时间窗测试免_clock：0 点起可打（测试跑在任意真实时刻都能过窗）
 // 周插入容量调大（主流程兼容旧行为；K=2 的容量行为在 7.5 用纯函数直接测）
 process.env.DUTY_WEEKLY_INSERTION_ALLOWANCE = '10';
 process.env.DUTY_MEMBERS_FILE = MEMBERS_FILE;
