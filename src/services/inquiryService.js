@@ -358,7 +358,8 @@ async function sessionRecord(openId) {
 const PUNCH_OPEN_SHANGHAI_HOUR = Number.isFinite(Number(process.env.DUTY_PUNCH_OPEN_HOUR))
   ? Number(process.env.DUTY_PUNCH_OPEN_HOUR) : 18; // 测试可 env 覆盖（0 也合法）；生产缺省 18 点
 // 跨零点补收窗（10-22 口径）：00:00–04:00 打卡/照片仍算值日当天——时间窗判定放行
-const PUNCH_LATE_NIGHT_END_HOUR = Number(process.env.DUTY_PUNCH_LATE_NIGHT_END_HOUR) || 4;
+const PUNCH_LATE_NIGHT_END_HOUR = Number.isFinite(Number(process.env.DUTY_PUNCH_LATE_NIGHT_END_HOUR))
+  ? Number(process.env.DUTY_PUNCH_LATE_NIGHT_END_HOUR) : 4; // 同款 falsy-zero 防御（0 也合法）
 
 function shanghaiHourNow() {
   // 走 utils/dates 的 shanghaiParts（本仓统一上海挂钟源）——桩测试可冻结时钟，

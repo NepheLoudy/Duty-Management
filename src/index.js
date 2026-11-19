@@ -71,6 +71,9 @@ app.post('/api/chat/command', async (req, res) => {
 
     if (body.type === 'image') {
       const result = await assistant.handleImagePayload(body);
+      // 留痕覆盖照片载荷（2026-11-19 v103 审查补）：照片是零回执事故的受害路径之一，
+      // 此前 image 分支在留痕之前 return——照片链路排查同样需要到达/回执留痕
+      console.log(`[指令] p2p 图片×${(Array.isArray(body.imageKeys) ? body.imageKeys.length : body.imageKey ? 1 : 0)} openId=${String(body.openId || '')} reply=${result.reply ? '有' : '无'}`);
       return res.json({ reply: result.reply || '' });
     }
 
@@ -82,7 +85,7 @@ app.post('/api/chat/command', async (req, res) => {
     // 处理留痕（2026-11-19 v101）：打卡/请假等 p2p 业务指令记一行——此前成功路径零日志，
     // 队员反馈「没回执」时无法判定请求是否到达（姜辰磊 11-18 三连打卡排查实锤）
     if (body.chatType === 'p2p') {
-      console.log(`[指令] p2p ${String(body.command || '').slice(0, 20)} openId=${String(body.openId || '').slice(0, 16)} reply=${result.reply ? '有' : '无'}`);
+      console.log(`[指令] p2p ${String(body.command || '').slice(0, 20)} openId=${String(body.openId || '')} reply=${result.reply ? '有' : '无'}`);
     }
     res.json({ reply: result.reply || '' });
   } catch (err) {
